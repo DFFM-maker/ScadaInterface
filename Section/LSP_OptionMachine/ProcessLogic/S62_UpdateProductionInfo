@@ -71,6 +71,7 @@ CASE ProductionChange_State OF
             ProductionChange_State := AckSent; // <-- FIX
         END_IF;
 
+
     ProcessingAccepted:
         ScadaInterface.Egress.ProductionChangeOK := TRUE;
         ScadaInterface.Egress.ActualProductionInfo          := internalSgProductionInfoRequest;

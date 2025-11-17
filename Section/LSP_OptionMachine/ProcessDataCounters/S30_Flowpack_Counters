@@ -1,0 +1,83 @@
+(********************************************************************************
+    Section: S30_Flowpack_Counters
+    Description: Assigns raw counters and calculates all percentages for the
+                 Flowpack machine, populating the FlowpackAnalytics structure.
+*********************************************************************************)
+
+// --- PART 1: Calculate Total Rejects and Assign Raw Counts ---
+
+// Assign main production counters
+MachineAnalytics.FlowpackAnalytics.Production.Products_In_Total     := HMI_OnlineStatistics.InputProducts;
+MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Good     := HMI_OnlineStatistics.TotalPacksCount;
+
+// Assign individual reject reason counters
+MachineAnalytics.FlowpackAnalytics.Rejects.Reject_EmptyPackets          := HMI_OnlineStatistics.ChainEmptyPacksCount;
+MachineAnalytics.FlowpackAnalytics.Rejects.Reject_DoublePackets         := HMI_OnlineStatistics.OutPutConveyorDoublePacksCount;
+MachineAnalytics.FlowpackAnalytics.Rejects.Reject_CrushedByCrimper      := HMI_OnlineStatistics.CrimperLongDwellSensorCrushCount;
+MachineAnalytics.FlowpackAnalytics.Rejects.Reject_ChainPackets          := HMI_OnlineStatistics.ChainEjectionPacksCount;
+MachineAnalytics.FlowpackAnalytics.Rejects.Reject_PictureCardMissPackets := HMI_OnlineStatistics.PictureCardMissPacksCount;
+MachineAnalytics.FlowpackAnalytics.Rejects.Reject_CameraNoGoodPackets  := HMI_OnlineStatistics.CameraNGPacksCount;
+
+
+// Now, calculate the total number of rejected products by summing up the reasons
+MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Rejected   := 
+    MachineAnalytics.FlowpackAnalytics.Rejects.Reject_EmptyPackets +
+    MachineAnalytics.FlowpackAnalytics.Rejects.Reject_DoublePackets +
+    MachineAnalytics.FlowpackAnalytics.Rejects.Reject_CrushedByCrimper +
+    MachineAnalytics.FlowpackAnalytics.Rejects.Reject_ChainPackets +
+    MachineAnalytics.FlowpackAnalytics.Rejects.Reject_PictureCardMissPackets +
+    MachineAnalytics.FlowpackAnalytics.Rejects.Reject_CameraNoGoodPackets;
+	
+
+// --- PART 2: Calculate Percentages ---
+
+// --- A) Percentages based on Total Products Entered ---
+IF MachineAnalytics.FlowpackAnalytics.Production.Products_In_Total > 0 THEN
+    
+    // % Good Products vs. In Total
+    L_Temp_LREAL := (DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Good) / DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Production.Products_In_Total)) * 100.0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_Good_vs_In := LREAL_TO_DINT(L_Temp_LREAL * 100.0); // Salvato come 9839 per 98.39%
+
+ELSE
+    // If no products have entered, percentage is zero
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_Good_vs_In := 0;
+END_IF;
+
+
+// --- B) Percentages for Reject Analysis (based on Total Products Rejected) ---
+IF MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Rejected > 0 THEN
+
+    // % Empty Packets vs. Total Rejected
+    L_Temp_LREAL := (DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Rejects.Reject_EmptyPackets) / DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Rejected)) * 100.0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedEmptyPackets := LREAL_TO_DINT(L_Temp_LREAL * 100.0);
+
+    // % Double Packets vs. Total Rejected
+    L_Temp_LREAL := (DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Rejects.Reject_DoublePackets) / DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Rejected)) * 100.0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedDoublePackets := LREAL_TO_DINT(L_Temp_LREAL * 100.0);
+
+    // % Crushed by Crimper vs. Total Rejected
+    L_Temp_LREAL := (DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Rejects.Reject_CrushedByCrimper) / DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Rejected)) * 100.0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedCrushedByCrimper := LREAL_TO_DINT(L_Temp_LREAL * 100.0);
+
+    // % Reject Chain vs. Total Rejected
+    L_Temp_LREAL := (DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Rejects.Reject_ChainPackets) / DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Rejected)) * 100.0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedChainPackets := LREAL_TO_DINT(L_Temp_LREAL * 100.0);
+	
+    // % Reject Picturecard Miss vs. Total Rejected
+    L_Temp_LREAL := (DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Rejects.Reject_PictureCardMissPackets) / DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Rejected)) * 100.0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedPictureCardMissPackets := LREAL_TO_DINT(L_Temp_LREAL * 100.0);
+	
+    // % Reject Camera NG vs. Total Rejected
+    L_Temp_LREAL := (DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Rejects.Reject_CameraNoGoodPackets) / DINT_TO_LREAL(MachineAnalytics.FlowpackAnalytics.Production.Products_Out_Rejected)) * 100.0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedCameraNoGoodPackets := LREAL_TO_DINT(L_Temp_LREAL * 100.0);
+		
+
+ELSE
+    // If there are no rejects, the breakdown of causes is zero
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedEmptyPackets       := 0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedDoublePackets      := 0;
+    MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedCrushedByCrimper   := 0;
+	MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedChainPackets := 0;
+	MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedPictureCardMissPackets := 0;
+	MachineAnalytics.FlowpackAnalytics.Percentages.Perc_RejectedCameraNoGoodPackets := 0;
+END_IF;
