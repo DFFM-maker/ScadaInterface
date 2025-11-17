@@ -8,6 +8,21 @@
 LastScanCycleTime := T#8ms; // Placeholder - Replace with actual scan time retrieval
 LastScanCycleTime_ms := TimeToNanoSec(LastScanCycleTime) / 1000000;
 
+// --- Costanti per ottimizzazione block-based scanning ---
+MAX_ALARM_ID := 1343; // Massimo ID allarme (1344 allarmi totali: 0-1343)
+ALARMS_PER_BLOCK := 64; // Numero di allarmi da processare per blocco (riduce carico CPU)
+NUM_BLOCKS := (MAX_ALARM_ID + 1) / ALARMS_PER_BLOCK; // Numero totale di blocchi (21 blocchi)
+
+// --- Variabili per block-based scanning ---
+BlockScanIndex : INT := 0; // Indice del blocco corrente da processare
+BlockStartIndex : INT; // Indice di inizio del blocco corrente
+BlockEndIndex : INT; // Indice di fine del blocco corrente
+
+// --- Variabili per caching MTTR/MTBF ---
+CycleCount : INT := 0; // Contatore cicli per calcolo MTTR/MTBF ogni 10 cicli
+CachedTotalTime_sec : LREAL := 0.0; // Cache per tempo totale monitorato
+TotalActiveTime_sec : LREAL; // Variabile temporanea per calcolo MTBF
+
 // --- 2. Initialize Top Alarm Data on First Run ---
 IF P_First_Run THEN
     FOR i := 0 TO 99 DO
@@ -45,23 +60,23 @@ NX_ImageLWORD[18].LW := LINT_TO_LWORD(AlarmLINT72);
 NX_ImageLWORD[19].LW := LINT_TO_LWORD(AlarmLINT76);
 NX_ImageLWORD[20].LW := LINT_TO_LWORD(AlarmLINT82);
 
-// --- 4. Process All Alarms (Main Loop) ---
+// --- 4. Process Alarms in Blocks (Optimized Block-Based Scanning) ---
+// Processa un blocco di allarmi per ciclo per ridurre il carico CPU
 
-FOR AlarmID := 0 TO MAX_ALARM_ID DO
+// Calcola gli indici di inizio e fine per il blocco corrente
+BlockStartIndex := BlockScanIndex * ALARMS_PER_BLOCK;
+BlockEndIndex := BlockStartIndex + ALARMS_PER_BLOCK - 1;
+IF BlockEndIndex > MAX_ALARM_ID THEN
+    BlockEndIndex := MAX_ALARM_ID;
+END_IF;
+
+// Processa solo il blocco corrente di allarmi
+FOR AlarmID := BlockStartIndex TO BlockEndIndex DO
 	
 	AlarmGroup := AlarmID / 64; // Divisione intera
     GroupBit   := AlarmID MOD 64; // Resto della divisione
     // Calculate LWORD group and bit index
 	
-(*    IF AlarmID = 0 THEN
-        AlarmGroup := 0;
-        GroupBit := 0;
-    END_IF;
-
-    IF GroupBit = 64 THEN
-        GroupBit := 0;
-        AlarmGroup := AlarmGroup + 1;
-    END_IF;*)
     // Estrai il bit dell'allarme corrente
     CurrentAlarmBit := NX_ImageLWORD[AlarmGroup].BL[GroupBit];
     
@@ -80,25 +95,50 @@ FOR AlarmID := 0 TO MAX_ALARM_ID DO
             ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms + LastScanCycleTime_ms;
     END_IF;
 
-    // --- Calcolo MTTR e MTBF ---
-    IF ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count > 0 THEN
+    // Memorizza lo stato attuale per il confronto al prossimo ciclo
+    PreviousAlarmBits[AlarmID] := CurrentAlarmBit;
+END_FOR;
+
+// Aggiorna l'indice del blocco per il prossimo ciclo
+BlockScanIndex := BlockScanIndex + 1;
+IF BlockScanIndex >= NUM_BLOCKS THEN
+    BlockScanIndex := 0;
+END_IF;
+
+// --- Calcolo MTTR e MTBF (ulteriormente ottimizzato con caching) ---
+// Calcola MTTR/MTBF solo per gli allarmi del blocco corrente e solo quando necessario
+FOR AlarmID := BlockStartIndex TO BlockEndIndex DO
+    // Calcola MTTR/MTBF solo se l'allarme ha avuto attivazioni e solo ogni 10 cicli per ridurre i calcoli
+    IF ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count > 0 AND (CycleCount MOD 10 = 0 OR 
+        ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTTR_sec = 0.0) THEN
+        
+        // Cache il tempo totale monitorato per evitare calcoli ripetuti
+        IF CachedTotalTime_sec = 0.0 THEN
+            CachedTotalTime_sec := LINT_TO_LREAL(MachineAnalytics.TimeAnalytics.TotalTime.Hours * 3600 + 
+                                               MachineAnalytics.TimeAnalytics.TotalTime.Minutes * 60);
+        END_IF;
+        
+        // Calcolo MTTR (Mean Time To Repair)
         ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTTR_sec := 
             (LINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms) / 1000.0) 
             / DINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count);
 
-        TotalMonitoredTime_sec := LINT_TO_LREAL(MachineAnalytics.TimeAnalytics.TotalTime.Hours * 3600 + MachineAnalytics.TimeAnalytics.TotalTime.Minutes * 60);
-        TotalActiveTime_sec  := LINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms) / 1000.0;
+        // Calcolo MTBF (Mean Time Between Failures)
+        TotalActiveTime_sec := LINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms) / 1000.0;
         
         ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTBF_h :=
-            ((TotalMonitoredTime_sec - TotalActiveTime_sec) / DINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count)) / 3600.0;
-    ELSE
-        ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTTR_sec := 0.0;
-        ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTBF_h   := 0.0;
+            ((CachedTotalTime_sec - TotalActiveTime_sec) / DINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count)) / 3600.0;
     END_IF;
-
-    // Memorizza lo stato attuale per il confronto al prossimo ciclo
-    PreviousAlarmBits[AlarmID] := CurrentAlarmBit;
 END_FOR;
+
+// Resetta la cache del tempo totale ogni ciclo
+CachedTotalTime_sec := 0.0;
+
+// Incrementa il contatore cicli
+CycleCount := CycleCount + 1;
+IF CycleCount >= 10000 THEN
+    CycleCount := 0; // Resetta per evitare overflow
+END_IF;
 
 (********************************************************************************
     Section: Alarm_Analytics - PART 3: Periodic Update of Top Alarm Lists

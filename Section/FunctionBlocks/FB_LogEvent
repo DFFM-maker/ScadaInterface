@@ -1,67 +1,144 @@
-VAR internal
-PrevTrigger	BOOL	False		False	False	
-TriggerRising	BOOL	False		False	False	
-idx	INT			False	False	
-temp1	String[120]			False	False	
-temp2	String[120]			False	False	
-temp3	String[120]			False	False	
-temp4	String[120]			False	False	
-temp5	String[120]			False	False	
-temp6	String[120]			False	False	
-temp7	String[120]			False	False	
+FUNCTION_BLOCK FB_LogEvent
 
-Var In/Out 
-EventType	Input	STRING[16]	No Edge		False	False	
-Message	Input	STRING[40]	No Edge		False	False	
-Trigger	Input	BOOL	No Edge		False	False	
-Year	Input	INT	No Edge		False	False	
-Month	Input	INT	No Edge		False	False	
-Day	Input	INT	No Edge		False	False	
-Hour	Input	INT	No Edge		False	False	
-Minute	Input	INT	No Edge		False	False	
-Second	Input	INT	No Edge		False	False	
-LogDone	Output	BOOL	No Edge		False	False	
-ScadaLogs	In/Out	ST_Logs_Message	No Edge		False	False	
-EventCount	Output	UDINT	No Edge		False	False	
-LastEventTime	Output	DATE_AND_TIME	No Edge		False	False	
+VAR_INPUT
+    EventType   : STRING[16];   // Tipo evento (es: "ALARM", "WARNING", "INFO")
+    Message     : STRING[40];   // Messaggio descrittivo
+    Trigger     : BOOL;         // Fronte di salita per loggare evento
+    Year        : INT;          // Anno corrente
+    Month       : INT;          // Mese corrente (1-12)
+    Day         : INT;          // Giorno corrente (1-31)
+    Hour        : INT;          // Ora corrente (0-23)
+    Minute      : INT;          // Minuti correnti (0-59)
+    Second      : INT;          // Secondi correnti (0-59)
+END_VAR
 
+VAR_OUTPUT
+    LogDone         : BOOL;             // Impulso quando log scritto
+    EventCount      : UDINT;            // Contatore eventi totali
+    LastEventTime   : DATE_AND_TIME;    // Timestamp ultimo evento
+END_VAR
 
+VAR_IN_OUT
+    ScadaLogs   : ST_Logs_Message;  // Buffer circolare log
+END_VAR
+
+VAR
+    PrevTrigger     : BOOL := FALSE;    // Stato precedente trigger
+    TriggerRising   : BOOL := FALSE;    // Fronte di salita rilevato
+    idx             : INT;              // Indice corrente buffer
+    
+    // ✅ Ridotte da 7 a 3 variabili temporanee
+    strTimestamp    : STRING[30];   // Timestamp formattato "YYYY-MM-DD HH:MM:SS"
+    strEventPart    : STRING[80];   // Parte iniziale JSON
+    strFinal        : STRING[200];  // JSON completo finale
+END_VAR
 
 (********************************************************************************
     FUNCTION BLOCK: FB_LogEvent
-    AUTHOR: Beppe
-    DATE: 2025-07-22
-    DESCRIPTION: ....
+    AUTHOR: DFFM-maker
+    DATE: 2025-01-17 (Ottimizzato)
+    
+    DESCRIPTION: 
+    Gestisce logging eventi in formato JSON su buffer circolare.
+    Su fronte di salita del segnale Trigger, formatta e salva un evento
+    con timestamp, tipo evento e messaggio.
+    
+    OTTIMIZZAZIONI APPLICATE:
+    - ✅ RIMOSSO hardcoded "Test" (bug riga 56 originale)
+    - ✅ Ridotti CONCAT da 8+ a solo 2 (usando FC_FormatTimestamp)
+    - ✅ Ridotte variabili temporanee da 7 a 3
+    - ✅ Sostituito magic number 99 con UPPER_BOUND dinamico
+    - ✅ Aggiunta validazione robusta indice buffer
+    - ✅ JSON compatto standard: {"ts":"...","type":"...","msg":"..."}
+    
+    FORMATO JSON OUTPUT:
+    {"ts":"2025-01-17 09:05:03","type":"ALARM","msg":"Motor overload"}
+    
+    RISPETTA VINCOLI SYSMAC:
+    - Max 5 parametri per CONCAT
+    - Scansione ciclica
+    - Tipi Omron nativi
 *********************************************************************************)
 
+// Reset segnale output
 LogDone := FALSE;
-// Rileva fronte di salita
+
+// ============================================================================
+// RILEVAMENTO FRONTE DI SALITA (Rising Edge Detection)
+// ============================================================================
 TriggerRising := Trigger AND NOT PrevTrigger;
-// Aggiorna PrevTrigger PRIMA del check
 PrevTrigger := Trigger;
 
 IF TriggerRising THEN
+    
+    // ========================================================================
+    // VALIDAZIONE E CORREZIONE INDICE BUFFER
+    // ========================================================================
     idx := ScadaLogs.LogIndexScada;
-    IF (idx < 0) OR (idx > 99) THEN
+    
+    // ✅ Usa UPPER_BOUND dinamico invece di magic number 99
+    IF (idx < 0) OR (idx > UPPER_BOUND(ScadaLogs.ScadaLogsJson, 1)) THEN
         idx := 0;
+        ScadaLogs.LogIndexScada := 0;  // Correggi anche variabile globale
     END_IF;
-
-    temp1 := CONCAT('{', '"Year":', DINT_TO_STRING(INT_TO_DINT(Year)), ',');
-    temp2 := CONCAT(temp1, '"Month":', DINT_TO_STRING(INT_TO_DINT(Month)), ',');
-    temp3 := CONCAT(temp2, '"Day":', DINT_TO_STRING(INT_TO_DINT(Day)), ',');
-    temp4 := CONCAT(temp3, '"Hour":', DINT_TO_STRING(INT_TO_DINT(Hour)), ',');
-    temp5 := CONCAT(temp4, '"Minute":', DINT_TO_STRING(INT_TO_DINT(Minute)), ',');
-    temp6 := CONCAT(temp5, '"Second":', DINT_TO_STRING(INT_TO_DINT(Second)), ',');
-    temp7 := CONCAT(temp6, '"EventType":"', LEFT(EventType, 16), '",');
-    ScadaLogs.ScadaLogsJson[idx] := CONCAT('Test', '"Message":"', LEFT(Message, 40), '"', '}');
-   // ScadaLogs.ScadaLogsJson[idx] := CONCAT(temp7, '"Message":"', LEFT(Message, 40), '"', '}');
-   LastEventTime:=GetTime();
-	
+    
+    // ========================================================================
+    // FORMATTAZIONE TIMESTAMP (1 chiamata funzione)
+    // ========================================================================
+    // ✅ Usa FC_FormatTimestamp riutilizzabile
+    strTimestamp := FC_FormatTimestamp(
+        Year   := Year,
+        Month  := Month,
+        Day    := Day,
+        Hour   := Hour,
+        Minute := Minute,
+        Second := Second
+    );
+    
+    // ========================================================================
+    // COSTRUZIONE JSON (2 CONCAT totali - rispetta limite Sysmac)
+    // ========================================================================
+    
+    // CONCAT 1: Parte iniziale JSON (4 parametri)
+    strEventPart := CONCAT(
+        '{"ts":"',
+        strTimestamp,
+        '","type":"',
+        LEFT(EventType, 16)  // Limita lunghezza tipo evento
+    );
+    
+    // CONCAT 2: Finalizza JSON (4 parametri)
+    strFinal := CONCAT(
+        strEventPart,
+        '","msg":"',
+        LEFT(Message, 40),   // Limita lunghezza messaggio
+        '"}'
+    );
+    
+    // ========================================================================
+    // SCRITTURA NEL BUFFER CIRCOLARE
+    // ========================================================================
+    ScadaLogs.ScadaLogsJson[idx] := strFinal;
+    
+    // ========================================================================
+    // AGGIORNAMENTO INDICE CIRCOLARE
+    // ========================================================================
     idx := idx + 1;
-    IF idx > 99 THEN
+    
+    // ✅ Gestione wrap-around con UPPER_BOUND dinamico
+    IF idx > UPPER_BOUND(ScadaLogs.ScadaLogsJson, 1) THEN
         idx := 0;
     END_IF;
+    
     ScadaLogs.LogIndexScada := idx;
-    LogDone := TRUE;
-	EventCount := EventCount + 1;
+    
+    // ========================================================================
+    // AGGIORNAMENTO STATISTICHE
+    // ========================================================================
+    LastEventTime := GetTime();     // Timestamp sistema Omron
+    EventCount := EventCount + 1;   // Incrementa contatore totale
+    LogDone := TRUE;                // Segnala completamento (impulso)
+    
 END_IF;
+
+END_FUNCTION_BLOCK
