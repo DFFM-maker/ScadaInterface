@@ -1,0 +1,38 @@
+//============================== Recipe Save =================================
+IF	HMI_NoRecipeMachine.Enable.HMI_RecipeSave AND HMI_OnLineData.HMI.SaveRecipeSetIntroducedOK THEN 
+RecipeNameImage.NameRecipe[1]:=HMI_RecipeMachine.RicipeNamePart1;
+RecipeNameImage.NameRecipe[2]:=HMI_RecipeMachine.RicipeNamePart2;
+RecipeNameImage.NameRecipe[3]:=HMI_RecipeMachine.RicipeNamePart3;
+RecipeNameImage.NameRecipe[4]:=HMI_RecipeMachine.RicipeNamePart4;	
+	
+RecipeName.NameRecipe[1]:=HMI_RecipeMachine.RicipeNamePart1;
+RecipeName.NameRecipe[2]:=HMI_RecipeMachine.RicipeNamePart2;
+RecipeName.NameRecipe[3]:=HMI_RecipeMachine.RicipeNamePart3;
+RecipeName.NameRecipe[4]:=HMI_RecipeMachine.RicipeNamePart4;	
+RecipeArchives[RecipeNumber]:=HMI_RecipeMachine; 
+HMI_RecipeName[RecipeNumber]:=RecipeName;
+HMI_NoRecipeMachine.HMI_RecipeNumberSelected:=+0;		
+END_IF;
+DW_Save(HMI_NoRecipeMachine.Enable.HMI_RecipeSave, SaveFallingEdge);
+IF SaveFallingEdge THEN
+DW_Shratch1[1]		:=			DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart1);
+DW_Shratch1[2]		:=			DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart2);
+DW_Shratch1[3]		:=			DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart3);
+DW_Shratch1[4]		:=			DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart4);
+Shratch1					:= 		ToAryByte(  DW_Shratch1 , _LOW_HIGH  , BE_Shratch1[1]);
+InternalRecipeName	:=		AryToString(BE_Shratch1[1], UINT#16);
+InternalNumToString	:=		NumToDecString(RecipeNumber, UINT#2, _BLANK);
+IF HMI_NoRecipeMachine.Enable.HMI_RecipeBackUpSaveEnable THEN
+InternalLeftSTR:=' Recipe save by Admin';
+InternalUser:='Adm';
+ELSE InternalLeftSTR:=' Recipe save by Operator'; InternalUser:='Opt';
+END_IF;
+RecipeLog.Print:=CONCAT('Ricetta Nr: ', internalNumToString , ' ', InternalRecipeName, InternalLeftSTR); 
+END_IF;
+IF SaveFallingEdge AND ( RecipeNumber <>HMI_NoRecipeMachine.HMI_RecipeNumberActive ) THEN
+RecipeNameImage:=HMI_RecipeName[HMI_NoRecipeMachine.HMI_RecipeNumberActive];
+HMI_RecipeMachine.RicipeNamePart1:=RecipeNameImage.NameRecipe[1];
+HMI_RecipeMachine.RicipeNamePart2:=RecipeNameImage.NameRecipe[2];
+HMI_RecipeMachine.RicipeNamePart3:=RecipeNameImage.NameRecipe[3];
+HMI_RecipeMachine.RicipeNamePart4:=RecipeNameImage.NameRecipe[4];	
+END_IF;	

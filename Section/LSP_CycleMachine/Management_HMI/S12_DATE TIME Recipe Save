@@ -1,0 +1,21 @@
+//============================== DATE TIME Recipe Save ===========================
+// Calculate and limit RecipeNumber_sv (this will be our index)
+RecipeNumber_sv := WORD_TO_INT(Encoder(RecipeNumberEncoder[0], USINT#6)) + 1;
+RecipeNumber_sv := LIMIT(INT#1, RecipeNumber_sv, INT#40); // RecipeNumber_sv is now guaranteed to be between 1 and 40
+
+// Prepare the DATE_TIME structure (as in the original code)
+DATE_TIME.BE[1] := INT_TO_BCD_BYTE(HMI_OnLineData.HMI.Clock_Hour);
+DATE_TIME.BE[0] := INT_TO_BCD_BYTE(HMI_OnLineData.HMI.Clock_Min);
+DATE_TIME.BE[3] := INT_TO_BCD_BYTE(HMI_OnLineData.HMI.Clock_Day);
+DATE_TIME.BE[2] := INT_TO_BCD_BYTE(HMI_OnLineData.HMI.Clock_Month);
+
+// Optimized save logic
+// Check the common condition only once
+IF HMI_NoRecipeMachine.Enable.HMI_RecipeSave THEN
+    // Use RecipeNumber_sv (which is already validated and between 1 and 40)
+    // as a direct index for the HMI_RecipeSave array.
+    // This assumes HMI_RecipeSave is an array indexed from 1 to 40.
+
+    HMI_RecipeSave[RecipeNumber_sv].DateSave := BCD_TO_DINT(DATE_TIME.DW);
+    HMI_RecipeSave[RecipeNumber_sv].User     := InternalUser; 
+END_IF;
