@@ -1,0 +1,38 @@
+VAR internal
+AddLog_Trig	R_TRIG			False	False	
+
+
+Var In/Out 
+LogBuffer	In/Out	ST_Logs_Message	No Edge		False	False	
+AddLog	Input	BOOL	No Edge		False	False	
+Message	Input	STRING[200]	No Edge		False	False	
+	
+
+
+
+(********************************************************************************
+    FUNCTION BLOCK: FB_CircularLog
+    AUTHOR: Beppe
+    DATE: 2025-07-22
+    DESCRIPTION: ....
+*********************************************************************************)
+
+AddLog_Trig(CLK := AddLog); // Istanzio il trigger
+
+IF AddLog_Trig.Q THEN // Eseguo solo quando AddLog passa da FALSE a TRUE
+    
+    // 1. Scrivo il nuovo messaggio nella posizione corrente indicata dall'indice
+    LogBuffer.ScadaLogsJson[LogBuffer.LogIndexScada] := Message;
+    
+    // 2. Incremento l'indice per la prossima scrittura
+    LogBuffer.LogIndexScada := LogBuffer.LogIndexScada + 1;
+    
+    // 3. Controllo se l'indice ha superato la dimensione massima dell'array (99)
+    IF LogBuffer.LogIndexScada > 99 THEN
+        
+        // 4. Se sì, lo riporto a 0 (comportamento circolare)
+        LogBuffer.LogIndexScada := 0;
+        
+    END_IF;
+
+END_IF;

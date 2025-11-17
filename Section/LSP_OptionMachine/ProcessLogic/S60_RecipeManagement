@@ -1,0 +1,187 @@
+(********************************************************************************
+    Section: S60_RecipeManagement
+    Description: Manages the recipe change process using a state machine and E_HandshakeState enum.
+*********************************************************************************)
+
+ScadaInterface.Egress.RemoteControlEnable:=MachineAnalytics.HMI_Interface.RemoteControlEn;
+
+isRemoteEnabled    := MachineAnalytics.HMI_Interface.RemoteControlEn;
+isRecipeIndexValid := (ScadaInterface.Ingress.RecipeIndexRequest > 0) AND (ScadaInterface.Ingress.RecipeIndexRequest < 30);
+isRequestValid     := isRemoteEnabled AND isRecipeIndexValid AND ScadaInterface.Ingress.RecipeChangeRequest;
+
+boRequestDetected(CLK:= isRequestValid);
+
+//======================================================================
+// STATE MACHINE LOGIC
+//======================================================================
+
+CASE RecipeChange_State OF
+    
+    WaitIdle:
+        ScadaInterface.Egress.RecipeChangeACK      := FALSE;
+        ScadaInterface.Egress.RecipeChangeOK       := FALSE;
+        ScadaInterface.Egress.RecipeChangeReject   := FALSE;
+        ScadaInterface.Egress.RecipeChangePostpone := FALSE;
+        MachineAnalytics.HMI_Interface.AckChangeRecipeToHMI := FALSE;
+
+        IF boRequestDetected.Q THEN
+            RecipeChange_State := RequestReceived;
+        END_IF;
+
+    RequestReceived:
+        internalRecipeIndex             := ScadaInterface.Ingress.RecipeIndexRequest;
+        internalSgProductionInfoRequest := ScadaInterface.Ingress.RecipeProductionInfoRequest;
+        internalDiProductionCodeRequest := ScadaInterface.Ingress.RecipeProductionCodeRequest;
+        internalDiProductionQuantityRequest := ScadaInterface.Ingress.RecipeProductionQuantityRequest;
+
+        L_InRecipeIndex  := DINT_TO_INT(internalRecipeIndex);
+        FOR IdxRecipe := 0 TO 40 DO
+            IF ScadaInterface.Egress.RecipeList[IdxRecipe].Index = L_InRecipeIndex THEN
+                MachineAnalytics.HMI_Interface.RecipeNameRequest := ScadaInterface.Egress.RecipeList[IdxRecipe].Name;
+                EXIT;
+            END_IF;
+        END_FOR;
+
+        MachineAnalytics.HMI_Interface.RecipeIndexRequest        := internalRecipeIndex;
+        MachineAnalytics.HMI_Interface.ProductionInfoRequest     := internalSgProductionInfoRequest;
+        MachineAnalytics.HMI_Interface.ProductionCodeRequest     := internalDiProductionCodeRequest;
+        MachineAnalytics.HMI_Interface.ProductionQuantityRequest := internalDiProductionQuantityRequest;
+
+        ScadaInterface.Egress.RecipeChangeACK := TRUE;
+
+        RecipeChange_State := AckSent;
+
+    AckSent:
+        IF NOT ScadaInterface.Ingress.RecipeChangeRequest THEN
+            ScadaInterface.Egress.RecipeChangeACK := FALSE;
+            MachineAnalytics.HMI_Interface.AckChangeRecipeToHMI := TRUE;
+            RecipeChange_State := WaitingForHMI;
+        END_IF;
+
+    WaitingForHMI:
+        IF MachineAnalytics.HMI_Interface.RecipeChangeOk AND NOT FLAG.RunCycle THEN
+            MachineAnalytics.HMI_Interface.RecipeChangeOk := FALSE;
+            RecipeChange_State := ProcessingAccepted;
+
+        ELSIF MachineAnalytics.HMI_Interface.RejectRecipeChange OR MachineAnalytics.HMI_Interface.CloseMESWindow THEN
+            MachineAnalytics.HMI_Interface.RejectRecipeChange := FALSE; 
+            MachineAnalytics.HMI_Interface.CloseMESWindow     := FALSE;
+            RecipeChange_State := ProcessingRejected;
+                             
+        ELSIF MachineAnalytics.HMI_Interface.BatchChangePopupDismiss THEN
+            MachineAnalytics.HMI_Interface.BatchChangePopupDismiss := FALSE;
+            ScadaInterface.Egress.RecipeChangePostpone := TRUE;
+            RecipeChange_State := Postponed;
+        END_IF;
+
+    Postponed:
+        ScadaInterface.Egress.RecipeChangePostpone := TRUE;
+        tonPospRecipe(IN:= TRUE, PT:= posponiDelay);
+        IF tonPospRecipe.Q THEN
+            tonPospRecipe(IN:= FALSE);
+            ScadaInterface.Egress.RecipeChangePostpone := FALSE;
+            RecipeChange_State := AckSent; // <-- FIX
+        END_IF;
+
+    ProcessingAccepted:
+        ScadaInterface.Egress.RecipeChangeOK := TRUE;
+
+        L_InRecipeLoadRequestFromScada  := DINT_TO_INT(internalRecipeIndex);
+        HMI_RecipeMachine := RecipeArchives[L_InRecipeLoadRequestFromScada];
+        RecipeName := HMI_RecipeName[L_InRecipeLoadRequestFromScada];
+        HMI_RecipeMachine.RicipeNamePart1 := RecipeName.NameRecipe[1];
+        HMI_RecipeMachine.RicipeNamePart2 := RecipeName.NameRecipe[2];
+        HMI_RecipeMachine.RicipeNamePart3 := RecipeName.NameRecipe[3];
+        HMI_RecipeMachine.RicipeNamePart4 := RecipeName.NameRecipe[4];
+
+        ScadaInterface.Egress.ActualProductionInfo          := internalSgProductionInfoRequest;
+        MachineAnalytics.HMI_Interface.ProductionInfoActual := internalSgProductionInfoRequest;
+        ScadaInterface.Egress.ActualProductionCode          := internalDiProductionCodeRequest;
+        MachineAnalytics.HMI_Interface.ProductionCodeActual := internalDiProductionCodeRequest;
+        ScadaInterface.Egress.ActualProductionQuantity      := internalDiProductionQuantityRequest;
+        MachineAnalytics.HMI_Interface.ProductionQuantityActual := internalDiProductionQuantityRequest;
+
+        HMI_NoRecipeMachine.HMI_RecipeNumberActive := L_InRecipeLoadRequestFromScada;
+        HMI_NoRecipeMachine.HMI_RecipeNumberSelected := 0;
+
+        ton_Reset_RecipeOK(IN:= TRUE, PT:= T#2s);
+        IF ton_Reset_RecipeOK.Q THEN
+            ton_Reset_RecipeOK(IN:= FALSE);
+            ScadaInterface.Egress.RecipeChangeOK := FALSE;
+            RecipeChange_State := WaitIdle;
+        END_IF;
+		IF NOT CambioRicetta_Event THEN
+    		CambioRicetta_Event := TRUE; // flag impulsivo
+		END_IF;
+    ProcessingRejected:
+        ScadaInterface.Egress.RecipeChangeReject := TRUE;
+        ton_Reset_RecipeReject(IN:= TRUE, PT:= T#2s);
+        IF ton_Reset_RecipeReject.Q THEN
+            ton_Reset_RecipeReject(IN:= FALSE);
+            ScadaInterface.Egress.RecipeChangeReject := FALSE;
+            RecipeChange_State := WaitIdle;
+        END_IF;
+
+END_CASE;
+//======================================================================
+// LOGGING CENTRALIZZATO: solo su cambio stato
+//======================================================================
+
+IF RecipeChange_State <> PrevRecipeChange_State THEN
+    AddLog := TRUE;
+    TsString := DtToString(TimeZoneAndDLS_DateTime);
+    CASE RecipeChange_State OF
+        WaitIdle:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: Idle - In attesa nuova richiesta SCADA');
+        RequestReceived:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: RequestReceived - Richiesta acquisita, ACK inviato');
+        AckSent:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: AckSent - Attendo handshake da SCADA');
+        WaitingForHMI:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: WaitingForHMI - Popup attivo, attendo operatore');
+        Postponed:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: Postponed - Operatore ha posticipato, timer avviato');
+        ProcessingAccepted:
+            NewLogMessage := CONCAT(TsString, ' | ','Stato: Accepted - Ricetta accettata, caricamento in corso');
+        ProcessingRejected:
+            NewLogMessage := CONCAT(TsString, ' | ','Stato: Rejected - Ricetta rifiutata, KO inviato a SCADA');
+        ELSE
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: UNKNOWN');
+    END_CASE;
+ELSE
+    AddLog := FALSE;
+END_IF;
+
+// --- Trigger impulsivo per il log (rising edge)
+AddLog_Trig(CLK := AddLog);
+
+// --- Scrittura log solo sul fronte
+IF AddLog_Trig.Q THEN
+    LogManager(AddLog := TRUE, Message := NewLogMessage, LogBuffer := ScadaLogs);
+	LogManager(AddLog := FALSE, Message := NewLogMessage, LogBuffer := ScadaLogs);
+END_IF;
+
+// --- Aggiorna il precedente SOLO alla fine ---
+PrevRecipeChange_State := RecipeChange_State;
+
+// --- Logic outside the State Machine ---
+
+// --- Logic outside the State Machine (Popup flag locale) ---
+S60_EnablePopup := MachineAnalytics.HMI_Interface.AckChangeRecipeToHMI AND RecipeChange_State = WaitingForHMI;
+IF RecipeChange_State <> WaitingForHMI THEN
+    MachineAnalytics.HMI_Interface.AckChangeRecipeToHMI := FALSE;
+END_IF;
+
+(*IF MachineAnalytics.HMI_Interface.AckChangeRecipeToHMI AND RecipeChange_State = WaitingForHMI THEN
+    HMI_OnLineData.HMI.OverlapCallNumber := +320;
+    HMI_OnLineData.HMI.WriteArea_Overlap1 := TRUE;
+ELSE
+    HMI_OnLineData.HMI.WriteArea_Overlap1 := FALSE;
+    IF RecipeChange_State <> WaitingForHMI THEN
+        MachineAnalytics.HMI_Interface.AckChangeRecipeToHMI := FALSE;
+    END_IF;
+END_IF;*)
+// Reset the ACK to SCADA once the request from SCADA is gone
+IF NOT ScadaInterface.Ingress.RecipeChangeRequest THEN
+    ScadaInterface.Egress.RecipeChangeACK := FALSE;
+END_IF;

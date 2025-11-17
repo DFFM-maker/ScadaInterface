@@ -1,0 +1,38 @@
+VAR internal
+LastSave	BOOL			False	False	
+
+Var In/Out 
+SaveTrigger	Input	BOOL	No Edge		False	False	
+ArchiveType	Input	INT	No Edge		False	False	
+StartTimestamp	Input	ST_Timestamp	No Edge		False	False	
+EndTimestamp	Input	ST_Timestamp	No Edge		False	False	
+LotCode	Input	DINT	No Edge		False	False	
+RecipeName	Input	STRING[38]	No Edge		False	False	
+ProductionTotals	Input	ST_ProductionTotals	No Edge		False	False	
+FlowpackTotals	Input	ST_Flowpack_ProductionCounts	No Edge		False	False	
+RejectReasons	Input	ST_Flowpack_RejectReasons	No Edge		False	False	
+MachineTimers	Input	ST_MachineTimers	No Edge		False	False	
+Note	Input	STRING[64]	No Edge		False	False	
+
+
+Var External
+ArchiveHistory	False	
+ArchiveHistory_Index	False	
+	
+
+
+
+IF SaveTrigger AND NOT LastSave THEN
+    ArchiveHistory_Index := (ArchiveHistory_Index + 1) MOD 100;
+    ArchiveHistory[ArchiveHistory_Index].ArchiveType := ArchiveType;
+    ArchiveHistory[ArchiveHistory_Index].StartTimestamp := StartTimestamp;
+    ArchiveHistory[ArchiveHistory_Index].EndTimestamp := EndTimestamp;
+    ArchiveHistory[ArchiveHistory_Index].LotCode := LotCode;
+    ArchiveHistory[ArchiveHistory_Index].RecipeName := RecipeName;
+    ArchiveHistory[ArchiveHistory_Index].ProductionTotals := ProductionTotals;
+    ArchiveHistory[ArchiveHistory_Index].FlowpackTotals := FlowpackTotals;
+    ArchiveHistory[ArchiveHistory_Index].RejectReasons := RejectReasons;
+    ArchiveHistory[ArchiveHistory_Index].MachineTimers := MachineTimers;
+    ArchiveHistory[ArchiveHistory_Index].Note := Note;
+END_IF;
+

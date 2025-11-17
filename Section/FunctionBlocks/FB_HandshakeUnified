@@ -1,0 +1,182 @@
+VAR internal
+PrevState	E_HandshakeState			False	False	Stato interno handshake per case
+TimerPostpone	TON			False	False	Timer feedback OK (T#2s)
+TimerAccepted	TON			False	False	Timer feedback KO (T#2s)
+TimerRejected	TON			False	False	Timer posticipa operatore (T#30s)
+AddLog	BOOL			False	False	
+AddLog_Trig	R_TRIG			False	False	R_TRIG accettazione operatore
+TrigRejected	R_TRIG			False	False	R_TRIG rifiuto operatore
+TrigPostponed	R_TRIG			False	False	R_TRIG posticipa operatore
+TrigAccepted	R_TRIG			False	False	
+TimeRejected	TIME	T#2s		False	False	Durata timer feedback OK/KO
+TimeAccepted	TIME	T#2s		False	False	Durata timer feedback OK/KO
+TimePostpone	TIME	T#30s		False	False	Durata timer posticipa
+TsString	STRING[30]			False	False	
+InternalInfoRequest	STRING[38]			False	False	
+InternalRecipeName	STRING[38]			False	False	
+InternalCodeRequest	DINT			False	False	
+InternalQuantityRequest	DINT			False	False	
+InternalRecipeIndex	DINT			False	False	
+	
+
+
+Var In/Out 
+RemoteEnabled	Input	BOOL	No Edge		False	False	
+ChangeRequest	Input	BOOL	No Edge		False	False	Trigger from SCADA/HMI
+InfoRequest	Input	STRING[38]	No Edge		False	False	ProductionInfo
+RecipeNameRequest	Input	STRING[38]	No Edge		False	False	RecipeName
+CodeRequest	Input	DINT	No Edge		False	False	RecipeCode/ProductionCode
+QuantityRequest	Input	DINT	No Edge		False	False	RecipeQuantity/ProductionQuantity
+RecipeIndexRequest	Input	DINT	No Edge		False	False	RecipeIndex
+StateIn	Input	E_HandshakeState	No Edge		False	False	
+ConfirmUpdate	Input	BOOL	No Edge		False	False	Operator Accepted
+CancelUpdate	Input	BOOL	No Edge		False	False	Operator Cancelled
+PostponeUpdate	Input	BOOL	No Edge		False	False	Operator Postponed
+CloseWindow	Input	BOOL	No Edge		False	False	Operator closed popup
+RunCycle	Input	BOOL	No Edge		False	False	Machine running
+StateOut	Output	E_HandshakeState	No Edge		False	False	
+AckToScada	Output	BOOL	No Edge		False	False	
+OkToScada	Output	BOOL	No Edge		False	False	
+RejectToScada	Output	BOOL	No Edge		False	False	
+PostponeToScada	Output	BOOL	No Edge		False	False	
+ActualInfo	Output	STRING[38]	No Edge		False	False	
+ActualRecipeName	Output	STRING[38]	No Edge		False	False	
+ActualCode	Output	DINT	No Edge		False	False	
+ActualQuantity	Output	DINT	No Edge		False	False	
+ActualRecipeIndex	Output	DINT	No Edge		False	False	
+PopupEnable	Output	BOOL	No Edge		False	False	
+PopupCallNumber	Output	INT	No Edge		False	False	
+LogMessage	Output	STRING[200]	No Edge		False	False	
+LogTrigger	Output	BOOL	No Edge		False	False	
+
+Var External
+
+TimeZoneAndDLS_DateTime	False	
+
+
+
+(********************************************************************************
+    FB_HandshakeUnified - State Machine for Recipe/Production Change
+    Gestione handshake, logging, popup HMI, timer e variabili interne specifiche
+*********************************************************************************)
+
+// --- STATE MACHINE ---
+
+CASE StateIn OF
+    WaitIdle:
+        AckToScada := FALSE; OkToScada := FALSE; RejectToScada := FALSE; PostponeToScada := FALSE;
+        PopupEnable := FALSE;
+        IF RemoteEnabled AND ChangeRequest THEN
+            StateOut := RequestReceived;
+        ELSE
+            StateOut := WaitIdle;
+        END_IF;
+
+    RequestReceived:
+        InternalInfoRequest     := InfoRequest;
+        InternalRecipeName      := RecipeNameRequest;
+        InternalCodeRequest     := CodeRequest;
+        InternalQuantityRequest := QuantityRequest;
+        InternalRecipeIndex     := RecipeIndexRequest;
+        AckToScada := TRUE;
+        StateOut := AckSent;
+
+    AckSent:
+        IF NOT ChangeRequest THEN
+            AckToScada := FALSE;
+            PopupEnable := TRUE;
+            StateOut := WaitingForHMI;
+        ELSE
+            StateOut := AckSent;
+        END_IF;
+
+    WaitingForHMI:
+        IF ConfirmUpdate AND NOT RunCycle THEN
+            TrigAccepted(CLK := TRUE);
+            StateOut := ProcessingAccepted;
+        ELSIF CancelUpdate OR CloseWindow THEN
+            TrigRejected(CLK := TRUE);
+            StateOut := ProcessingRejected;
+        ELSIF PostponeUpdate THEN
+            TrigPostponed(CLK := TRUE);
+            PostponeToScada := TRUE;
+            PopupEnable := FALSE;
+            StateOut := Postponed;
+        ELSE
+            StateOut := WaitingForHMI;
+        END_IF;
+
+    Postponed:
+        PostponeToScada := TRUE;
+        TimerPostpone(IN := TRUE, PT := TimePostpone);
+        IF TimerPostpone.Q THEN
+            TimerPostpone(IN := FALSE);
+            PostponeToScada := FALSE;
+            StateOut := AckSent;
+        ELSE
+            StateOut := Postponed;
+        END_IF;
+
+    ProcessingAccepted:
+        OkToScada := TRUE;
+        ActualInfo        := InternalInfoRequest;
+        ActualRecipeName  := InternalRecipeName;
+        ActualCode        := InternalCodeRequest;
+        ActualQuantity    := InternalQuantityRequest;
+        ActualRecipeIndex := InternalRecipeIndex;
+
+        TimerAccepted(IN := TRUE, PT := TimeAccepted);
+        IF TimerAccepted.Q THEN
+            TimerAccepted(IN := FALSE);
+            OkToScada := FALSE;
+            StateOut := WaitIdle;
+        ELSE
+            StateOut := ProcessingAccepted;
+        END_IF;
+
+    ProcessingRejected:
+        RejectToScada := TRUE;
+        TimerRejected(IN := TRUE, PT := TimeRejected);
+        IF TimerRejected.Q THEN
+            TimerRejected(IN := FALSE);
+            RejectToScada := FALSE;
+            StateOut := WaitIdle;
+        ELSE
+            StateOut := ProcessingRejected;
+        END_IF;
+
+END_CASE;
+
+// --- LOGGING CENTRALIZZATO ---
+IF StateOut <> PrevState THEN
+    AddLog := TRUE;
+    TsString := DtToString(TimeZoneAndDLS_DateTime);
+    CASE StateOut OF
+        WaitIdle:
+            LogMessage := CONCAT(TsString, ' | ', 'Stato: Idle - In attesa nuova richiesta SCADA');
+        RequestReceived:
+            LogMessage := CONCAT(TsString, ' | ', 'Stato: RequestReceived - Richiesta acquisita, ACK inviato');
+        AckSent:
+            LogMessage := CONCAT(TsString, ' | ', 'Stato: AckSent - Attendo handshake da SCADA');
+        WaitingForHMI:
+            LogMessage := CONCAT(TsString, ' | ', 'Stato: WaitingForHMI - Popup attivo, attendo operatore');
+        Postponed:
+            LogMessage := CONCAT(TsString, ' | ', 'Stato: Postponed - Operatore ha posticipato, timer avviato');
+        ProcessingAccepted:
+            LogMessage := CONCAT(TsString, ' | ','Stato: Accepted - Accettato, caricamento in corso');
+        ProcessingRejected:
+            LogMessage := CONCAT(TsString, ' | ','Stato: Rejected - Rifiutato, KO inviato a SCADA');
+        ELSE
+            LogMessage := CONCAT(TsString, ' | ', 'Stato: UNKNOWN');
+    END_CASE;
+ELSE
+    AddLog := FALSE;
+END_IF;
+
+// --- Trigger impulsivo per il log (rising edge)
+AddLog_Trig(CLK := AddLog);
+LogTrigger := AddLog_Trig.Q;
+
+// --- PopupCallNumber: da impostare quando istanzi la FB (es: 320 per ricetta, 322 per produzione) ---
+
+PrevState := StateOut;

@@ -1,0 +1,27 @@
+(********************************************************************************
+    Section: S12_ALL Clear Monitoring
+    Description: ......
+*********************************************************************************)
+
+
+// This IF block is now only needed to timestamp the reset event.
+IF ResetSignal THEN
+    HMI_OnlineStatistics.D18294 := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Year);
+    HMI_OnlineStatistics.D18292 := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Month);
+    HMI_OnlineStatistics.D18290 := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Day);
+    HMI_OnlineStatistics.D18296 := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Hour);
+    HMI_OnlineStatistics.D18298 := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Min);
+    HMI_OnlineStatistics.D18300 := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Sec);
+	
+	    // --- PART 2: Timestamp the Reset Event (versione aggiornata) ---
+    // We now write to our new, clean structure.
+    MachineAnalytics.ProductionLastReset_Timestamp.Year   := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Year);
+    MachineAnalytics.ProductionLastReset_Timestamp.Month  := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Month);
+    MachineAnalytics.ProductionLastReset_Timestamp.Day    := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Day);
+    MachineAnalytics.ProductionLastReset_Timestamp.Hour   := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Hour);
+    MachineAnalytics.ProductionLastReset_Timestamp.Minute := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Min);
+    MachineAnalytics.ProductionLastReset_Timestamp.Second := INT_TO_DINT(HMI_OnLineData.HMI.Clock_Sec);
+
+	
+END_IF;
+

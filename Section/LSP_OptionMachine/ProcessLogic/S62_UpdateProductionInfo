@@ -1,0 +1,165 @@
+(********************************************************************************
+    Section: S62_UpdateProductionInfo
+    Description: Aggiornamento info Ordine/Lotto con logica handshake e logging eventi tramite FB_LogEvent
+*********************************************************************************)
+
+// --- Rilevamento richiesta da SCADA for Update Production---
+isRemoteEnabled    := MachineAnalytics.HMI_Interface.RemoteControlEn;
+updateRequestDetected := ScadaInterface.Ingress.ProductionChangeRequest AND isRemoteEnabled;
+boInfoRequestDetected(CLK := updateRequestDetected);
+
+//======================================================================
+// STATE MACHINE LOGIC
+//======================================================================
+
+CASE ProductionChange_State OF
+    
+    WaitIdle:
+        ScadaInterface.Egress.ProductionChangeACK      := FALSE;
+        ScadaInterface.Egress.ProductionChangeOK      := FALSE;
+		ScadaInterface.Egress.ProductionChangeReject   := FALSE;
+        ScadaInterface.Egress.ProductionChangePostpone := FALSE;
+        MachineAnalytics.HMI_Interface.ActivateUpdatePopup := FALSE;
+
+        IF boInfoRequestDetected.Q THEN
+            ProductionChange_State := RequestReceived;
+        END_IF;
+
+    RequestReceived:
+        internalSgProductionInfoRequest := ScadaInterface.Ingress.ProductionInfoRequest;
+        internalDiProductionCodeRequest := ScadaInterface.Ingress.ProductionCodeRequest;
+        internalDiProductionQuantityRequest := ScadaInterface.Ingress.ProductionQuantityRequest;
+		
+        MachineAnalytics.HMI_Interface.ProductionInfoRequest     := internalSgProductionInfoRequest;
+        MachineAnalytics.HMI_Interface.ProductionCodeRequest     := internalDiProductionCodeRequest;
+        MachineAnalytics.HMI_Interface.ProductionQuantityRequest := internalDiProductionQuantityRequest;
+
+        ScadaInterface.Egress.ProductionChangeACK := TRUE;
+
+        ProductionChange_State := AckSent;
+
+    AckSent:
+        IF NOT ScadaInterface.Ingress.ProductionChangeRequest THEN
+            ScadaInterface.Egress.ProductionChangeACK := FALSE;
+            MachineAnalytics.HMI_Interface.ActivateUpdatePopup := TRUE;
+            ProductionChange_State := WaitingForHMI;
+        END_IF;
+
+    WaitingForHMI:
+        IF MachineAnalytics.HMI_Interface.ConfirmProductionInfoUpdate AND NOT FLAG.RunCycle THEN
+            MachineAnalytics.HMI_Interface.ConfirmProductionInfoUpdate := FALSE;
+            ProductionChange_State := ProcessingAccepted;
+
+        ELSIF MachineAnalytics.HMI_Interface.CancelProductionInfoUpdate OR MachineAnalytics.HMI_Interface.CloseMESWindow THEN
+            MachineAnalytics.HMI_Interface.CancelProductionInfoUpdate := FALSE; 
+            MachineAnalytics.HMI_Interface.CloseMESWindow     := FALSE;
+            ProductionChange_State := ProcessingRejected;
+                             
+        ELSIF MachineAnalytics.HMI_Interface.PostponeProductionInfoUpdate THEN
+            MachineAnalytics.HMI_Interface.PostponeProductionInfoUpdate := FALSE;
+            ScadaInterface.Egress.ProductionChangePostpone := TRUE;
+			MachineAnalytics.HMI_Interface.ActivateUpdatePopup := FALSE;
+            ProductionChange_State := Postponed;
+        END_IF;
+
+    Postponed:
+        ScadaInterface.Egress.ProductionChangePostpone := TRUE;
+        postponeTimer(IN:= TRUE, PT:= posponiDelay);
+        IF postponeTimer.Q THEN
+            postponeTimer(IN:= FALSE);
+            ScadaInterface.Egress.ProductionChangePostpone := FALSE;
+            ProductionChange_State := AckSent; // <-- FIX
+        END_IF;
+
+    ProcessingAccepted:
+        ScadaInterface.Egress.ProductionChangeOK := TRUE;
+        ScadaInterface.Egress.ActualProductionInfo          := internalSgProductionInfoRequest;
+        MachineAnalytics.HMI_Interface.ProductionInfoActual := internalSgProductionInfoRequest;
+        ScadaInterface.Egress.ActualProductionCode          := internalDiProductionCodeRequest;
+        MachineAnalytics.HMI_Interface.ProductionCodeActual := internalDiProductionCodeRequest;
+        ScadaInterface.Egress.ActualProductionQuantity      := internalDiProductionQuantityRequest;
+        MachineAnalytics.HMI_Interface.ProductionQuantityActual := internalDiProductionQuantityRequest;
+
+
+        ton_Reset_InfoOK(IN:= TRUE, PT:= T#2s);
+        IF ton_Reset_InfoOK.Q THEN
+            ton_Reset_InfoOK(IN:= FALSE);
+            ScadaInterface.Egress.ProductionChangeOK := FALSE;
+            ProductionChange_State := WaitIdle;
+        END_IF;
+		IF NOT CambioLotto_Event THEN
+    		CambioLotto_Event := TRUE; // flag impulsivo
+		END_IF;
+
+    ProcessingRejected:
+        ScadaInterface.Egress.ProductionChangeReject := TRUE;
+        ton_Reset_InfoReject(IN:= TRUE, PT:= T#2s);
+        IF ton_Reset_InfoReject.Q THEN
+            ton_Reset_InfoReject(IN:= FALSE);
+            ScadaInterface.Egress.ProductionChangeReject := FALSE;
+            ProductionChange_State := WaitIdle;
+        END_IF;
+
+END_CASE;
+
+//======================================================================
+// LOGGING CENTRALIZZATO: solo su cambio stato
+//======================================================================
+
+IF ProductionChange_State <> PrevProductionChange_State THEN
+    AddLog := TRUE;
+    TsString := DtToString(TimeZoneAndDLS_DateTime);
+    CASE ProductionChange_State OF
+        WaitIdle:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: Idle - In attesa nuova richiesta SCADA');
+        RequestReceived:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: RequestReceived - Richiesta acquisita, ACK inviato');
+        AckSent:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: AckSent - Attendo handshake da SCADA');
+        WaitingForHMI:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: WaitingForHMI - Popup attivo, attendo operatore');
+        Postponed:
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: Postponed - Operatore ha posticipato, timer avviato');
+        ProcessingAccepted:
+            NewLogMessage := CONCAT(TsString, ' | ','Stato: Accepted - Produzione Accettata, caricamento in corso');
+        ProcessingRejected:
+            NewLogMessage := CONCAT(TsString, ' | ','Stato: Rejected - Produzione rifiutata, KO inviato a SCADA');
+        ELSE
+            NewLogMessage := CONCAT(TsString, ' | ', 'Stato: UNKNOWN');
+    END_CASE;
+ELSE
+    AddLog := FALSE;
+END_IF;
+
+// --- Trigger impulsivo per il log (rising edge)
+AddLog_Trig(CLK := AddLog);
+
+// --- Scrittura log solo sul fronte
+IF AddLog_Trig.Q THEN
+    LogManager(AddLog := TRUE, Message := NewLogMessage, LogBuffer := ScadaLogs);
+	LogManager(AddLog := FALSE, Message := NewLogMessage, LogBuffer := ScadaLogs);
+END_IF;
+
+// --- Aggiorna il precedente SOLO alla fine ---
+PrevProductionChange_State := ProductionChange_State;
+
+// --- Logic outside the State Machine ---
+// --- Logic outside the State Machine (Popup flag locale) ---
+S62_EnablePopup := MachineAnalytics.HMI_Interface.ActivateUpdatePopup AND ProductionChange_State = WaitingForHMI;
+IF ProductionChange_State <> WaitingForHMI THEN
+    MachineAnalytics.HMI_Interface.ActivateUpdatePopup := FALSE;
+END_IF;
+(*IF MachineAnalytics.HMI_Interface.ActivateUpdatePopup AND ProductionChange_State = WaitingForHMI THEN
+    HMI_OnLineData.HMI.OverlapCallNumber := +322;
+    HMI_OnLineData.HMI.WriteArea_Overlap1 := TRUE;
+ELSE
+    HMI_OnLineData.HMI.WriteArea_Overlap1 := FALSE;
+	    IF ProductionChange_State <> WaitingForHMI THEN
+        MachineAnalytics.HMI_Interface.ActivateUpdatePopup := FALSE;
+    END_IF;
+END_IF;*)
+
+// Reset the ACK to SCADA once the request from SCADA is gone
+IF NOT ScadaInterface.Ingress.ProductionChangeRequest THEN
+    ScadaInterface.Egress.ProductionChangeACK := FALSE;
+END_IF;

@@ -1,0 +1,18 @@
+IF MachineAnalytics.HMI_Interface.ResetType Then
+	ResetType:=1;
+	Else
+	ResetType:=0;
+END_IF;
+
+ScadaInterface.Egress.ResetType := MachineAnalytics.HMI_Interface.ResetType;
+
+CASE ResetType OF
+    0: // Reset su cambio ricetta
+        IF CambioRicetta_Event THEN
+            ResetEvent := TRUE;
+        END_IF;
+    1: // Reset su cambio lotto
+        IF CambioLotto_Event THEN
+            ResetEvent := TRUE;
+        END_IF;
+END_CASE;

@@ -1,0 +1,98 @@
+(********************************************************************************
+    Section: S10_ProcessTimeStatistics
+    Description: Calls the state timer FBs for each machine state using the
+                 definitive logic conditions from the documentation.
+*********************************************************************************)
+
+// Generate a 1-second rising edge pulse
+UP_Second_Efficiency(Get1sClk(), RisingEdge_Second_Efficiency);
+
+// Get the reset signal from the HMI
+ResetSignal := HMI_OnlineStatistics.Enable.ResetEfficiency;
+
+// 1. Total Time (always enabled)
+TotalTime_Monitor(
+    Enable        := TRUE,
+    Clock_1s      := RisingEdge_Second_Efficiency,
+    TotalTime_sec := 0, // Not used, it IS the total time
+    Reset         := ResetSignal
+);
+
+// 2. Run Time
+RunTime_Monitor(
+    Enable        := FLAG.RunCycle,
+    Clock_1s      := RisingEdge_Second_Efficiency,
+    TotalTime_sec := TotalTime_Monitor.AccumulatedSeconds, 
+    Reset         := ResetSignal
+);
+
+// 3. Stop Time
+StopTime_Monitor(
+    Enable        := NOT FLAG.RunCycle AND FLAG.ServoON1,
+    Clock_1s      := RisingEdge_Second_Efficiency,
+    TotalTime_sec := TotalTime_Monitor.AccumulatedSeconds, // <-- MODIFIED: No conversion needed
+    Reset         := ResetSignal
+);
+
+// 4. Emergency Time
+EmergencyTime_Monitor(
+    Enable        := NOT FLAG.ServoON1,
+    Clock_1s      := RisingEdge_Second_Efficiency,
+    TotalTime_sec := TotalTime_Monitor.AccumulatedSeconds, // <-- MODIFIED: No conversion needed
+    Reset         := ResetSignal
+);
+
+// 5. Downstream Wait Time
+// Accumulates time when the downstream machine is NOT ready
+DownstreamTime_Monitor(
+    Enable        := FLAG.RunCycle AND (FLAG.CycleAutomaticMode OR FLAG.CycleEmptyingMode) AND NOT FLAG.RunEnableFromSuccessive,
+    Clock_1s      := RisingEdge_Second_Efficiency,
+    TotalTime_sec := TotalTime_Monitor.AccumulatedSeconds,
+    Reset         := ResetSignal
+);
+
+// 6. Upstream Wait Time
+// Accumulates time when the upstream machine is NOT providing a product
+UpstreamTime_Monitor(
+    Enable        := FLAG.RunCycle AND FLAG.CycleAutomaticMode AND NOT FLAG.RunEnableFromPrevious,
+    Clock_1s      := RisingEdge_Second_Efficiency,
+    TotalTime_sec := TotalTime_Monitor.AccumulatedSeconds,
+    Reset         := ResetSignal
+);
+
+
+
+
+
+// --- PART 3: Assign outputs to the unified MachineAnalytics structure ---
+// We must assign each member individually as direct struct assignment is not supported.
+
+// Total Time
+MachineAnalytics.TimeAnalytics.TotalTime.Hours      := TotalTime_Monitor.Hours;
+MachineAnalytics.TimeAnalytics.TotalTime.Minutes    := TotalTime_Monitor.Minutes;
+MachineAnalytics.TimeAnalytics.TotalTime.Percentage := 10000; // Total is always 100.00%
+
+// Run Time
+MachineAnalytics.TimeAnalytics.RunTime.Hours      := RunTime_Monitor.Hours;
+MachineAnalytics.TimeAnalytics.RunTime.Minutes    := RunTime_Monitor.Minutes;
+MachineAnalytics.TimeAnalytics.RunTime.Percentage := RunTime_Monitor.Percentage;
+
+// Stop Time
+MachineAnalytics.TimeAnalytics.StopTime.Hours      := StopTime_Monitor.Hours;
+MachineAnalytics.TimeAnalytics.StopTime.Minutes    := StopTime_Monitor.Minutes;
+MachineAnalytics.TimeAnalytics.StopTime.Percentage := StopTime_Monitor.Percentage;
+
+// Emergency Time
+MachineAnalytics.TimeAnalytics.EmergencyTime.Hours      := EmergencyTime_Monitor.Hours;
+MachineAnalytics.TimeAnalytics.EmergencyTime.Minutes    := EmergencyTime_Monitor.Minutes;
+MachineAnalytics.TimeAnalytics.EmergencyTime.Percentage := EmergencyTime_Monitor.Percentage;
+
+// Downstream Time
+MachineAnalytics.TimeAnalytics.DownstreamTime.Hours      := DownstreamTime_Monitor.Hours;
+MachineAnalytics.TimeAnalytics.DownstreamTime.Minutes    := DownstreamTime_Monitor.Minutes;
+MachineAnalytics.TimeAnalytics.DownstreamTime.Percentage := DownstreamTime_Monitor.Percentage;
+
+// Upstream Time
+MachineAnalytics.TimeAnalytics.UpstreamTime.Hours      := UpstreamTime_Monitor.Hours;
+MachineAnalytics.TimeAnalytics.UpstreamTime.Minutes    := UpstreamTime_Monitor.Minutes;
+MachineAnalytics.TimeAnalytics.UpstreamTime.Percentage := UpstreamTime_Monitor.Percentage;

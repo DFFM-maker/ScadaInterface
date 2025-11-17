@@ -1,0 +1,44 @@
+//=============================== Array Index RECIPES ===============================\\
+
+// Partenza da k=0 per evitare duplicazione sull'array [0] e [1]
+IF(P_First_Run OR HMI_NoRecipeMachine.Enable.HMI_RecipeSave) THEN
+	
+	// Svuoto tutte le posizioni dell'array compatto prima di popolare
+	FOR m := 0 TO 40 BY 1 DO
+		D_Recipes[l].Index := 0;
+        D_Recipes[l].Name[1] := 0;
+        D_Recipes[l].Name[2] := 0;
+        D_Recipes[l].Name[3] := 0;
+        D_Recipes[l].Name[4] := 0;
+    	ScadaInterface.Egress.RecipeList[m].Index := 0;
+    	ScadaInterface.Egress.RecipeList[m].Name := ''; 
+	END_FOR;
+
+    // Riempie array compatto con ricette valide
+    k := 0;
+    FOR l := 1 TO 40 BY 1 DO
+        D_Recipes[l].Index := 0;
+        D_Recipes[l].Name[1] := 0;
+        D_Recipes[l].Name[2] := 0;
+        D_Recipes[l].Name[3] := 0;
+        D_Recipes[l].Name[4] := 0;
+        IF (HMI_RecipeName[l].NameRecipe[1] <> 0 OR 
+            HMI_RecipeName[l].NameRecipe[2] <> 0 OR
+            HMI_RecipeName[l].NameRecipe[3] <> 0 OR
+            HMI_RecipeName[l].NameRecipe[4] <> 0) THEN
+            D_Recipes[k].Index := l;
+            D_Recipes[k].Name[1] := HMI_RecipeName[l].NameRecipe[1];
+            D_Recipes[k].Name[2] := HMI_RecipeName[l].NameRecipe[2];
+            D_Recipes[k].Name[3] := HMI_RecipeName[l].NameRecipe[3];
+            D_Recipes[k].Name[4] := HMI_RecipeName[l].NameRecipe[4];
+            DW_Shratch1[1] := DINT_TO_DWORD(D_Recipes[k].Name[1]);
+            DW_Shratch1[2] := DINT_TO_DWORD(D_Recipes[k].Name[2]);
+            DW_Shratch1[3] := DINT_TO_DWORD(D_Recipes[k].Name[3]);
+            DW_Shratch1[4] := DINT_TO_DWORD(D_Recipes[k].Name[4]);
+            Shratch1 := ToAryByte(DW_Shratch1, _LOW_HIGH, BE_Shratch1[1]);
+            ScadaInterface.Egress.RecipeList[k].Index := l;
+            ScadaInterface.Egress.RecipeList[k].Name := AryToString(BE_Shratch1[1], UINT#16);
+            k := k + 1;
+        END_IF;
+    END_FOR;
+END_IF;

@@ -1,0 +1,52 @@
+VAR internal
+Internal_Accumulator_sec	LINT			False	False	
+
+Var In/Out 
+Enable	Input	BOOL	No Edge		False	False	
+Clock_1s	Input	BOOL	No Edge		False	False	
+TotalTime_sec	Input	LINT	No Edge		False	False	
+Reset	Input	BOOL	No Edge		False	False	
+Hours	Output	DINT	No Edge		False	False	
+Minutes	Output	DINT	No Edge		False	False	
+Percentage	Output	DINT	No Edge		False	False	
+AccumulatedSeconds	Output	LINT	No Edge		False	False	
+
+
+(********************************************************************************
+    FUNCTION BLOCK: FB_StateTimer
+    AUTHOR: Beppe
+    DATE: 2025-07-22
+    DESCRIPTION: This FB accumulates time when an Enable condition is TRUE,
+                 calculates the total hours and minutes, and the percentage
+                 of a given total time.
+*********************************************************************************)
+
+// Reset logic
+IF Reset THEN
+    Internal_Accumulator_sec := 0;
+END_IF;
+
+// Accumulate seconds only on the 1-second pulse and if the state is enabled
+IF Clock_1s AND Enable THEN
+    Internal_Accumulator_sec := Internal_Accumulator_sec + 1;
+END_IF;
+
+// The output is now a direct copy of the internal second counter
+AccumulatedSeconds := Internal_Accumulator_sec;
+
+
+// --- Perform calculations (can be done every scan or on the pulse) ---
+// Since the math is simple, we can do it every scan for immediate updates.
+
+// Calculate Hours
+Hours := LINT_TO_DINT(Internal_Accumulator_sec / 3600);
+    
+// Calculate Minutes
+Minutes := LINT_TO_DINT((Internal_Accumulator_sec MOD 3600) / 60);
+    
+// Calculate Percentage (with protection against division by zero)
+IF TotalTime_sec > 0 THEN
+    Percentage := LREAL_TO_DINT( (LINT_TO_LREAL(Internal_Accumulator_sec) / LINT_TO_LREAL(TotalTime_sec)) * 10000.0 );
+ELSE
+    Percentage := 0;
+END_IF;

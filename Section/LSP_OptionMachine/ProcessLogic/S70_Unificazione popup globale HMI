@@ -1,0 +1,15 @@
+// ================================
+// Unificazione popup globale HMI
+// ================================
+// Da inserire alla fine del ciclo principale, DOPO S60 e S62!
+
+IF S60_EnablePopup THEN
+    HMI_OnLineData.HMI.WriteArea_Overlap1 := TRUE;
+    HMI_OnLineData.HMI.OverlapCallNumber := 320;
+ELSIF S62_EnablePopup THEN
+    HMI_OnLineData.HMI.WriteArea_Overlap1 := TRUE;
+    HMI_OnLineData.HMI.OverlapCallNumber := 322;
+ELSE
+    HMI_OnLineData.HMI.WriteArea_Overlap1 := FALSE;
+    HMI_OnLineData.HMI.OverlapCallNumber := 0;
+END_IF;

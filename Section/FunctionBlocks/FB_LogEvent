@@ -1,0 +1,67 @@
+VAR internal
+PrevTrigger	BOOL	False		False	False	
+TriggerRising	BOOL	False		False	False	
+idx	INT			False	False	
+temp1	String[120]			False	False	
+temp2	String[120]			False	False	
+temp3	String[120]			False	False	
+temp4	String[120]			False	False	
+temp5	String[120]			False	False	
+temp6	String[120]			False	False	
+temp7	String[120]			False	False	
+
+Var In/Out 
+EventType	Input	STRING[16]	No Edge		False	False	
+Message	Input	STRING[40]	No Edge		False	False	
+Trigger	Input	BOOL	No Edge		False	False	
+Year	Input	INT	No Edge		False	False	
+Month	Input	INT	No Edge		False	False	
+Day	Input	INT	No Edge		False	False	
+Hour	Input	INT	No Edge		False	False	
+Minute	Input	INT	No Edge		False	False	
+Second	Input	INT	No Edge		False	False	
+LogDone	Output	BOOL	No Edge		False	False	
+ScadaLogs	In/Out	ST_Logs_Message	No Edge		False	False	
+EventCount	Output	UDINT	No Edge		False	False	
+LastEventTime	Output	DATE_AND_TIME	No Edge		False	False	
+
+
+
+(********************************************************************************
+    FUNCTION BLOCK: FB_LogEvent
+    AUTHOR: Beppe
+    DATE: 2025-07-22
+    DESCRIPTION: ....
+*********************************************************************************)
+
+LogDone := FALSE;
+// Rileva fronte di salita
+TriggerRising := Trigger AND NOT PrevTrigger;
+// Aggiorna PrevTrigger PRIMA del check
+PrevTrigger := Trigger;
+
+IF TriggerRising THEN
+    idx := ScadaLogs.LogIndexScada;
+    IF (idx < 0) OR (idx > 99) THEN
+        idx := 0;
+    END_IF;
+
+    temp1 := CONCAT('{', '"Year":', DINT_TO_STRING(INT_TO_DINT(Year)), ',');
+    temp2 := CONCAT(temp1, '"Month":', DINT_TO_STRING(INT_TO_DINT(Month)), ',');
+    temp3 := CONCAT(temp2, '"Day":', DINT_TO_STRING(INT_TO_DINT(Day)), ',');
+    temp4 := CONCAT(temp3, '"Hour":', DINT_TO_STRING(INT_TO_DINT(Hour)), ',');
+    temp5 := CONCAT(temp4, '"Minute":', DINT_TO_STRING(INT_TO_DINT(Minute)), ',');
+    temp6 := CONCAT(temp5, '"Second":', DINT_TO_STRING(INT_TO_DINT(Second)), ',');
+    temp7 := CONCAT(temp6, '"EventType":"', LEFT(EventType, 16), '",');
+    ScadaLogs.ScadaLogsJson[idx] := CONCAT('Test', '"Message":"', LEFT(Message, 40), '"', '}');
+   // ScadaLogs.ScadaLogsJson[idx] := CONCAT(temp7, '"Message":"', LEFT(Message, 40), '"', '}');
+   LastEventTime:=GetTime();
+	
+    idx := idx + 1;
+    IF idx > 99 THEN
+        idx := 0;
+    END_IF;
+    ScadaLogs.LogIndexScada := idx;
+    LogDone := TRUE;
+	EventCount := EventCount + 1;
+END_IF;

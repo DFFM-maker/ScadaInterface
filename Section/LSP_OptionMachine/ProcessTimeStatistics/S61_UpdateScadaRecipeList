@@ -1,0 +1,42 @@
+(********************************************************************************
+    Section: S61_UpdateScadaRecipeList
+    Description: Creates a clean list of available recipes and populates the
+                 ScadaInterface.Egress.RecipeList array.
+*********************************************************************************)
+
+// This logic should run on a trigger, like P_First_Run or when recipes are saved.
+IF P_First_Run OR HMI_NoRecipeMachine.Enable.HMI_RecipeSave THEN
+    
+    // First, clear the entire recipe list in the SCADA interface
+    // (This is a good practice to avoid old data)
+    FOR n := 0 TO 40 DO
+        ScadaInterface.Egress.RecipeList[n].Index := 0;
+        ScadaInterface.Egress.RecipeList[n].Name  := '';
+    END_FOR;
+    
+    // Now, loop through the source recipes and build the clean list
+    FOR n := 1 TO 40 DO
+        // Check if the recipe name is not empty
+        IF (HMI_RecipeName[n].NameRecipe[1] <> 0) OR
+           (HMI_RecipeName[n].NameRecipe[2] <> 0) OR
+           (HMI_RecipeName[n].NameRecipe[3] <> 0) OR
+           (HMI_RecipeName[n].NameRecipe[4] <> 0) THEN
+           
+            // Convert the DINT array to a STRING
+            DW_Shratch1[1] := DINT_TO_DWORD(HMI_RecipeName[n].NameRecipe[1]);
+            DW_Shratch1[2] := DINT_TO_DWORD(HMI_RecipeName[n].NameRecipe[2]);
+            DW_Shratch1[3] := DINT_TO_DWORD(HMI_RecipeName[n].NameRecipe[3]);
+            DW_Shratch1[4] := DINT_TO_DWORD(HMI_RecipeName[n].NameRecipe[4]);
+            (*_s(ToAryByte(ADR(DW_Shratch1), SIZEOF(DW_Shratch1)), _LOW_HIGH, ADR(BE_Shratch1), SIZEOF(BE_Shratch1));*)
+            Shratch1			:= ToAryByte(  DW_Shratch1 ,  _LOW_HIGH  , BE_Shratch1[1]);
+			
+			// Populate the next available slot in our SCADA recipe list
+            ScadaInterface.Egress.RecipeList[NumberOfRecipes].Index := n;
+            ScadaInterface.Egress.RecipeList[NumberOfRecipes].Name  := AryToString(BE_Shratch1[1],UINT#16);
+            
+            // Increment the counter for the next recipe
+            NumberOfRecipes := NumberOfRecipes + 1;
+        END_IF;
+    END_FOR;
+
+END_IF;
