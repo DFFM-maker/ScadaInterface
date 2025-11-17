@@ -1,0 +1,48 @@
+(********************************************************************************
+    Section: S40_UpdateScadaData
+    Description: Copies all final calculated data from the main MachineAnalytics
+                 structure to the SCADA interface structure (Egress).
+                 
+*********************************************************************************)
+
+// --- Copy Time-Based Analytics ---
+ScadaInterface.Egress.TimeAnalytics := MachineAnalytics.TimeAnalytics;
+
+// --- Copy Production-Based Analytics ---
+ScadaInterface.Egress.ProductionAnalytics := MachineAnalytics.ProductionAnalytics;
+
+// --- Copy Timestamps ---
+ScadaInterface.Egress.ProductionStart_Timestamp   := MachineAnalytics.ProductionStart_Timestamp;
+ScadaInterface.Egress.ProductionStop_Timestamp    := MachineAnalytics.ProductionStop_Timestamp;
+ScadaInterface.Egress.ProductionLastReset_Timestamp := MachineAnalytics.ProductionLastReset_Timestamp;
+
+
+
+// --- Machine Status  & Machine Status Flags  ---
+ScadaInterface.Egress.MachineStatus         := HMI_OnLineData.MachineStatus;
+ScadaInterface.Egress.IsRunning           			:= FLAG.RunCycle;
+ScadaInterface.Egress.IsStopped           			:= NOT FLAG.RunCycle;
+ScadaInterface.Egress.IsInEmergency       		:= NOT FLAG.ServoON1;
+ScadaInterface.Egress.IsWaitingDownstream := FLAG.RunCycle AND (FLAG.CycleAutomaticMode OR FLAG.CycleEmptyingMode) AND NOT FLAG.RunEnableFromSuccessive;
+ScadaInterface.Egress.IsWaitingUpstream   	:= FLAG.RunCycle AND FLAG.CycleAutomaticMode AND NOT FLAG.RunEnableFromPrevious;
+ScadaInterface.Egress.IsAlarmActive				:= FLAG.AlarmsPresent;
+
+// --- Recipe Actual Data ---
+ScadaInterface.Egress.ActualRecipeIndex     := HMI_NoRecipeMachine.HMI_RecipeNumberActive;
+
+DW_Shratch[1]:=	DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart1);
+DW_Shratch[2]:=	DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart2);
+DW_Shratch[3]:=	DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart3);
+DW_Shratch[4]:=	DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart4);
+Shratch			:= ToAryByte(  DW_Shratch ,  _LOW_HIGH  , BE_Shratch[1]);
+
+ScadaInterface.Egress.ActualRecipeName	:=		AryToString(BE_Shratch[1],UINT#16);
+
+// --- Calculate and Assign Machine Speed ---
+
+// Actual Speed Calculation
+ScadaInterface.Egress.ActualSpeed := DINT_TO_REAL(HMI_OnLineData.PackPerMinute) / 10.0;
+
+// Reference Speed from Recipe
+ScadaInterface.Egress.ReferenceSpeed := DINT_TO_REAL(HMI_RecipeMachine.MasterSpeedProduction) / 10.0;
+
