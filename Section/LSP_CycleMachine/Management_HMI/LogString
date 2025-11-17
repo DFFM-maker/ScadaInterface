@@ -1,0 +1,6 @@
+//------------------------------------------ Log String -----------------------------------------------------
+IF RecipeLog.Print <> '' AND RecipeLog.Print <> RecipeLog.ImagePrint THEN 
+	RecipeLog.Eventlog[0]:=CONCAT(dtToString(TimeZoneAndDLS_DateTime),'   ', RecipeLog.Print );  
+	ArySHL(RecipeLog.Eventlog[0],UINT#100,UINT#1); 
+END_IF; 
+RecipeLog.ImagePrint:=RecipeLog.Print; RecipeLog.Print:='';
