@@ -1,0 +1,69 @@
+PROGRAM AlarmAnalyticsOptimizationTest
+VAR
+    // Benchmark function block
+    Benchmark : FB_AlarmAnalyticsBenchmark;
+    
+    // Timer per misurazione tempo
+    TestTimer : TON;
+    TestDuration : TIME := T#30s; // Test di 30 secondi
+    
+    // Variabili di test
+    TestEnable : BOOL := FALSE;
+    TestReset : BOOL := FALSE;
+    TestCounter : UDINT;
+    
+    // Risultati del benchmark
+    CPU_Load : REAL;
+    ProcessingTime : UDINT;
+    AlarmsPerSecond : UDINT;
+    Efficiency : REAL;
+    
+    // Stato del test
+    TestActive : BOOL := FALSE;
+    TestComplete : BOOL := FALSE;
+END_VAR
+
+// Gestione del test di benchmark
+IF NOT TestActive AND NOT TestComplete THEN
+    // Avvia il test
+    TestEnable := TRUE;
+    TestReset := TRUE;
+    TestActive := TRUE;
+    TestTimer(IN := TRUE, PT := TestDuration); // Avvia timer
+    TestCounter := 0;
+END_IF;
+
+// Esegui il benchmark
+Benchmark(
+    Enable := TestEnable,
+    Reset := TestReset,
+    CPU_Load_Percent => CPU_Load,
+    ProcessingTime_us => ProcessingTime,
+    AlarmsProcessedPerSecond => AlarmsPerSecond,
+    OptimizationEfficiency => Efficiency
+);
+
+// Resetta il flag di reset dopo il primo ciclo
+TestReset := FALSE;
+
+// Conta i cicli di test e controlla durata
+IF TestActive THEN
+    TestCounter := TestCounter + 1;
+    TestTimer(IN := TestActive, PT := TestDuration); // Aggiorna timer
+    
+    // Termina il test quando il timer scade
+    IF TestTimer.Q THEN
+        TestEnable := FALSE;
+        TestActive := FALSE;
+        TestComplete := TRUE;
+    END_IF;
+END_IF;
+
+// Output dei risultati (in un ambiente reale, questi verrebbero visualizzati su HMI)
+// I seguenti valori possono essere monitorati:
+// - CPU_Load: Carico CPU stimato (dovrebbe essere ridotto del 60-70%)
+// - ProcessingTime: Tempo di elaborazione in microsecondi
+// - AlarmsPerSecond: Allarmi processati al secondo
+// - Efficiency: Efficienza dell'ottimizzazione (target: 60-70%)
+
+END_PROGRAM

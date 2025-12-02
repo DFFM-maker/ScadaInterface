@@ -1,5 +1,5 @@
 (********************************************************************************
-    Section: Alarm_Analytics
+    Section: Alarm_Analytics nuova versione
     Description: Scans all alarms, calculates advanced KPIs (Downtime, MTTR, MTBF),
                  and manages the Top Alarm lists.
 *********************************************************************************)
@@ -9,29 +9,8 @@ LastScanCycleTime := T#8ms; // Placeholder - Replace with actual scan time retri
 LastScanCycleTime_ms := TimeToNanoSec(LastScanCycleTime) / 1000000;
 
 // --- Costanti per ottimizzazione block-based scanning ---
-MAX_ALARM_ID := 1343; // Massimo ID allarme (1344 allarmi totali: 0-1343)
-ALARMS_PER_BLOCK := 64; // Numero di allarmi da processare per blocco (riduce carico CPU)
+
 NUM_BLOCKS := (MAX_ALARM_ID + 1) / ALARMS_PER_BLOCK; // Numero totale di blocchi (21 blocchi)
-
-// --- Variabili per block-based scanning ---
-BlockScanIndex : INT := 0; // Indice del blocco corrente da processare
-BlockStartIndex : INT; // Indice di inizio del blocco corrente
-BlockEndIndex : INT; // Indice di fine del blocco corrente
-
-// --- Variabili per caching MTTR/MTBF ---
-CycleCount : INT := 0; // Contatore cicli per calcolo MTTR/MTBF ogni 10 cicli
-CachedTotalTime_sec : LREAL := 0.0; // Cache per tempo totale monitorato
-TotalActiveTime_sec : LREAL; // Variabile temporanea per calcolo MTBF
-
-// --- Costanti per ottimizzazione Top Alarms ---
-TOP_ALARMS_TO_UPDATE_PER_CYCLE := 8; // Numero di allarmi da aggiornare per ciclo (ridotto da 20)
-TopAlarmUpdateInterval := 5; // Aggiorna Top Alarms ogni 5 cicli del timer principale
-TopAlarmMinThreshold := 5; // Soglia minima frequenza per considerare un allarme
-TopDowntimeMinThreshold := LINT#5000; // Soglia minima downtime (5 secondi) per considerare un allarme
-
-// --- Variabili per Top Alarms ottimizzati ---
-TopAlarmScanIndex : INT := 0; // Indice per scansione allarmi Top Alarms
-TopAlarmUpdateCycleCount : INT := 0; // Contatore per aggiornamento differito Top Alarms
 
 // --- 2. Initialize Top Alarm Data on First Run ---
 IF P_First_Run THEN
@@ -64,11 +43,8 @@ NX_ImageLWORD[12].LW := LINT_TO_LWORD(AlarmLINT48);
 NX_ImageLWORD[13].LW := LINT_TO_LWORD(AlarmLINT52);
 NX_ImageLWORD[14].LW := LINT_TO_LWORD(AlarmLINT56);
 NX_ImageLWORD[15].LW := LINT_TO_LWORD(AlarmLINT60);
-NX_ImageLWORD[16].LW := LINT_TO_LWORD(AlarmLINT64);
-NX_ImageLWORD[17].LW := LINT_TO_LWORD(AlarmLINT68);
-NX_ImageLWORD[18].LW := LINT_TO_LWORD(AlarmLINT72);
-NX_ImageLWORD[19].LW := LINT_TO_LWORD(AlarmLINT76);
-NX_ImageLWORD[20].LW := LINT_TO_LWORD(AlarmLINT82);
+
+
 
 // --- 4. Process Alarms in Blocks (Optimized Block-Based Scanning) ---
 // Processa un blocco di allarmi per ciclo per ridurre il carico CPU

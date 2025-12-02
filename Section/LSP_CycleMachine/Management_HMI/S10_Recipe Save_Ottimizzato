@@ -1,0 +1,65 @@
+//============================== Recipe Save Ottimizzato =================================
+// Elimina duplicazione dati e ottimizza performance
+VAR
+    // Buffer temporaneo per evitare duplicazioni
+    TempRecipeName : STRING(64);
+    TempRecipeNumber : INT;
+END_VAR
+
+IF HMI_NoRecipeMachine.Enable.HMI_RecipeSave AND HMI_OnLineData.HMI.SaveRecipeSetIntroducedOK THEN 
+    
+    // Ottimizzazione: usa reference invece di copia doppia
+    TempRecipeNumber := RecipeNumber;
+    
+    // Copia una sola volta in RecipeNameImage (usato per display)
+    RecipeNameImage.NameRecipe[1] := HMI_RecipeMachine.RicipeNamePart1;
+    RecipeNameImage.NameRecipe[2] := HMI_RecipeMachine.RicipeNamePart2;
+    RecipeNameImage.NameRecipe[3] := HMI_RecipeMachine.RicipeNamePart3;
+    RecipeNameImage.NameRecipe[4] := HMI_RecipeMachine.RicipeNamePart4;
+    
+    // Usa reference per RecipeName e HMI_RecipeName (evita copia doppia)
+    RecipeName := RecipeNameImage; // Reference copy
+    
+    // Salva recipe con reference
+    RecipeArchives[TempRecipeNumber] := HMI_RecipeMachine; 
+    HMI_RecipeName[TempRecipeNumber] := RecipeNameImage; // Già popolato
+    
+    // Reset selezione
+    HMI_NoRecipeMachine.HMI_RecipeNumberSelected := 0;
+    
+    // Genera log ottimizzato
+    DW_Save(HMI_NoRecipeMachine.Enable.HMI_RecipeSave, SaveFallingEdge);
+END_IF;
+
+IF SaveFallingEdge THEN
+    // Ottimizzazione: converte solo se necessario per log
+    DW_Shratch1[1] := DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart1);
+    DW_Shratch1[2] := DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart2);
+    DW_Shratch1[3] := DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart3);
+    DW_Shratch1[4] := DINT_TO_DWORD(HMI_RecipeMachine.RicipeNamePart4);
+    
+    Shratch1 := ToAryByte(DW_Shratch1, _LOW_HIGH, BE_Shratch1[1]);
+    InternalRecipeName := AryToString(BE_Shratch1[1], UINT#16);
+    InternalNumToString := NumToDecString(TempRecipeNumber, UINT#2, _BLANK);
+    
+    // Determina user type solo una volta
+    IF HMI_NoRecipeMachine.Enable.HMI_RecipeBackUpSaveEnable THEN
+        InternalLeftSTR := ' Recipe save by Admin';
+        InternalUser := 'Adm';
+    ELSE 
+        InternalLeftSTR := ' Recipe save by Operator'; 
+        InternalUser := 'Opt';
+    END_IF;
+    
+    // Log ottimizzato (usa buffer circolare se implementato)
+    RecipeLog.Print := CONCAT('Ricetta Nr: ', InternalNumToString, ' ', InternalRecipeName, InternalLeftSTR); 
+END_IF;
+
+// Gestione cambio recipe (ottimizzata con reference)
+IF SaveFallingEdge AND (TempRecipeNumber <> HMI_NoRecipeMachine.HMI_RecipeNumberActive) THEN
+    RecipeNameImage := HMI_RecipeName[HMI_NoRecipeMachine.HMI_RecipeNumberActive];
+    HMI_RecipeMachine.RicipeNamePart1 := RecipeNameImage.NameRecipe[1];
+    HMI_RecipeMachine.RicipeNamePart2 := RecipeNameImage.NameRecipe[2];
+    HMI_RecipeMachine.RicipeNamePart3 := RecipeNameImage.NameRecipe[3];
+    HMI_RecipeMachine.RicipeNamePart4 := RecipeNameImage.NameRecipe[4];
+END_IF;

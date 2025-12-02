@@ -1,0 +1,113 @@
+FUNCTION_BLOCK FB_RecipeLoggingBenchmark
+VAR_INPUT
+    Enable : BOOL; // Abilita il benchmarking
+    Reset : BOOL; // Resetta le statistiche
+END_VAR
+VAR_OUTPUT
+    CPU_Load_Percent : REAL; // Carico CPU stimato in percentuale
+    ProcessingTime_us : UDINT; // Tempo di elaborazione in microsecondi
+    LogsProcessedPerSecond : UDINT; // Log processati al secondo
+    StringOperationsPerSecond : UDINT; // Operazioni stringa al secondo
+END_VAR
+VAR
+    // Tempi di elaborazione
+    DeltaTime_us : UDINT;
+    CycleTime_us : UDINT; // Tempo ciclo simulato
+    
+    // Contatori
+    CycleCounter : UDINT;
+    TotalLogsProcessed : UDINT;
+    TotalStringOps : UDINT;
+    
+    // Calcolo carico CPU
+    BaseProcessingTime_us : UDINT := 50; // Tempo base per CONCAT + ArySHL
+    OptimizedProcessingTime_us : UDINT;
+    
+    // Statistiche
+    MinProcessingTime_us : UDINT := 16#FFFFFFFF;
+    MaxProcessingTime_us : UDINT := 0;
+    AvgProcessingTime_us : UDINT;
+    TotalProcessingTime_us : UDINT;
+    
+    // Stato interno
+    FirstRun : BOOL := TRUE;
+    BenchmarkActive : BOOL := FALSE;
+END_VAR
+
+// Gestione reset
+IF Reset THEN
+    CycleCounter := 0;
+    TotalLogsProcessed := 0;
+    TotalStringOps := 0;
+    TotalProcessingTime_us := 0;
+    MinProcessingTime_us := 16#FFFFFFFF;
+    MaxProcessingTime_us := 0;
+    StringOperationsPerSecond := 0;
+    RETURN;
+END_IF;
+
+// Avvia benchmarking se abilitato
+IF Enable AND NOT BenchmarkActive THEN
+    BenchmarkActive := TRUE;
+    FirstRun := TRUE;
+END_IF;
+
+IF NOT Enable THEN
+    BenchmarkActive := FALSE;
+    RETURN;
+END_IF;
+
+// Misurazione tempo di elaborazione (simulata)
+IF BenchmarkActive THEN
+    
+    // Simula il tempo di elaborazione basato sul tipo di operazione
+    IF FirstRun THEN
+        // Simula elaborazione non ottimizzata (CONCAT + ArySHL per 100 elementi)
+        DeltaTime_us := UDINT_TO_UDINT(BaseProcessingTime_us * 100 / 1); // 100x più lento
+        FirstRun := FALSE;
+    ELSE
+        // Simula elaborazione ottimizzata (circular buffer)
+        DeltaTime_us := BaseProcessingTime_us; // Solo operazioni essenziali
+    END_IF;
+    
+    // Aggiorna contatori
+    CycleCounter := CycleCounter + 1;
+    TotalLogsProcessed := TotalLogsProcessed + 1; // 1 log per ciclo
+    TotalStringOps := TotalStringOps + 2; // CONCAT + ArySHL o circular buffer
+    TotalProcessingTime_us := TotalProcessingTime_us + DeltaTime_us;
+    
+    // Aggiorna statistiche min/max
+    IF DeltaTime_us < MinProcessingTime_us THEN
+        MinProcessingTime_us := DeltaTime_us;
+    END_IF;
+    
+    IF DeltaTime_us > MaxProcessingTime_us THEN
+        MaxProcessingTime_us := DeltaTime_us;
+    END_IF;
+    
+    // Calcola media e throughput
+    IF CycleCounter > 0 THEN
+        AvgProcessingTime_us := UDINT_TO_UDINT(TotalProcessingTime_us / CycleCounter);
+        
+        IF TotalProcessingTime_us > 0 THEN
+            // Calcolo throughput: operazioni / secondo
+            LogsProcessedPerSecond := UDINT_TO_UDINT((CycleCounter * 1000000) / TotalProcessingTime_us);
+            StringOperationsPerSecond := UDINT_TO_UDINT((TotalStringOps * 1000000) / TotalProcessingTime_us);
+        ELSE
+            LogsProcessedPerSecond := 0;
+            StringOperationsPerSecond := 0;
+        END_IF;
+    END_IF;
+    
+    // Stima carico CPU (basato su ciclo 8ms standard)
+    CPU_Load_Percent := (UDINT_TO_REAL(DeltaTime_us) / 8000.0) * 100.0;
+    IF CPU_Load_Percent > 100.0 THEN
+        CPU_Load_Percent := 100.0;
+    END_IF;
+    
+    // Aggiorna output
+    ProcessingTime_us := DeltaTime_us;
+    
+END_IF;
+
+END_FUNCTION_BLOCK

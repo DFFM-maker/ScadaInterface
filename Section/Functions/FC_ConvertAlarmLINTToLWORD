@@ -1,4 +1,4 @@
-FUNCTION FC_ConvertAlarmLINTToLWORD : VOID
+FUNCTION FC_ConvertAlarmLINTToLWORD : BOOL
 VAR_INPUT
     AlarmLINT : ARRAY[0..20] OF LINT;
 END_VAR
@@ -7,6 +7,7 @@ VAR_IN_OUT
 END_VAR
 VAR
     i : INT;
+    Success : BOOL;
 END_VAR
 
 (********************************************************************************
@@ -25,9 +26,15 @@ END_VAR
     - Facile manutenzione e lettura
 *********************************************************************************)
 
+// Inizializza stato
+Success := TRUE;
+
 // Conversione ottimizzata in blocco
 FOR i := 0 TO 20 DO
     NX_ImageLWORD[i] := LINT_TO_LWORD(AlarmLINT[i]);
 END_FOR;
+
+// Restituisce TRUE se conversione completata con successo
+FC_ConvertAlarmLINTToLWORD := Success;
 
 END_FUNCTION

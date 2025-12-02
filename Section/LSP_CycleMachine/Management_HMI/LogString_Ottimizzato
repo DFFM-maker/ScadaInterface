@@ -1,0 +1,28 @@
+//------------------------------------------ Log String Ottimizzato -----------------------------------------
+// Circular buffer implementation per ridurre spostamenti memoria
+VAR
+    // Circular buffer per event log (20 elementi invece di 100)
+    LogEventBuffer : ARRAY[0..19] OF STRING(120);
+    LogBufferHead : INT := 0;
+    LogBufferCount : INT := 0;
+    LogLastPrint : STRING(100) := '';
+END_VAR
+
+// Ottimizzazione: usa circular buffer invece di ArySHL
+IF RecipeLog.Print <> '' AND RecipeLog.Print <> LogLastPrint THEN 
+    // Aggiungi nuovo log in testa
+    LogEventBuffer[LogBufferHead] := CONCAT(dtToString(TimeZoneAndDLS_DateTime),'   ', RecipeLog.Print);
+    
+    // Aggiorna circular buffer
+    LogBufferHead := (LogBufferHead + 1) MOD 20;
+    
+    IF LogBufferCount < 20 THEN
+        LogBufferCount := LogBufferCount + 1;
+    END_IF;
+    
+    // Copia nel sistema principale solo se necessario
+    RecipeLog.Eventlog[0] := LogEventBuffer[(LogBufferHead - 1 + 20) MOD 20];
+END_IF;
+
+LogLastPrint := RecipeLog.Print; 
+RecipeLog.Print := '';

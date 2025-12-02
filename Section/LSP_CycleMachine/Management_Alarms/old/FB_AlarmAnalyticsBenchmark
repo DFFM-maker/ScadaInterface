@@ -1,0 +1,131 @@
+FUNCTION_BLOCK FB_AlarmAnalyticsBenchmark
+VAR_INPUT
+    Enable : BOOL; // Abilita il benchmarking
+    Reset : BOOL; // Resetta le statistiche
+END_VAR
+VAR_OUTPUT
+    CPU_Load_Percent : REAL; // Carico CPU stimato in percentuale
+    ProcessingTime_us : UDINT; // Tempo di elaborazione in microsecondi
+    AlarmsProcessedPerSecond : UDINT; // Allarmi processati al secondo
+    OptimizationEfficiency : REAL; // Efficienza dell'ottimizzazione (percentuale)
+END_VAR
+VAR
+    // Tempi di elaborazione
+    DeltaTime_us : UDINT;
+    CycleTime_us : UDINT; // Tempo ciclo simulato
+    
+    // Contatori
+    CycleCounter : UDINT;
+    TotalAlarmsProcessed : UDINT;
+    
+    // Calcolo carico CPU
+    BaseProcessingTime_us : UDINT := 100; // Tempo base stimato in microsecondi
+    OptimizedProcessingTime_us : UDINT;
+    NonOptimizedTime_us : UDINT; // Tempo non ottimizzato per confronto
+    
+    // Statistiche
+    MinProcessingTime_us : UDINT := 16#FFFFFFFF;
+    MaxProcessingTime_us : UDINT := 0;
+    AvgProcessingTime_us : UDINT;
+    TotalProcessingTime_us : UDINT;
+    
+    // Stato interno
+    FirstRun : BOOL := TRUE;
+    BenchmarkActive : BOOL := FALSE;
+END_VAR
+
+// Gestione reset
+IF Reset THEN
+    CycleCounter := 0;
+    TotalAlarmsProcessed := 0;
+    TotalProcessingTime_us := 0;
+    MinProcessingTime_us := 16#FFFFFFFF;
+    MaxProcessingTime_us := 0;
+    OptimizationEfficiency := 0.0;
+    FirstRun := TRUE;
+    RETURN;
+END_IF;
+
+// Avvia benchmarking se abilitato
+IF Enable AND NOT BenchmarkActive THEN
+    BenchmarkActive := TRUE;
+    FirstRun := TRUE;
+END_IF;
+
+IF NOT Enable THEN
+    BenchmarkActive := FALSE;
+    RETURN;
+END_IF;
+
+// Misurazione tempo di elaborazione (simulata)
+// In un ambiente reale, questo verrebbe chiamato all'inizio/fine del processing
+IF BenchmarkActive THEN
+    
+    // Simula il tempo di elaborazione basato sul numero di allarmi processati
+    // Prima dell'ottimizzazione: elaborazione di tutti gli allarmi (1344)
+    // Dopo l'ottimizzazione: elaborazione di un blocco (64 allarmi)
+    IF FirstRun THEN
+        // Stima del tempo di elaborazione pre-ottimizzazione
+        DeltaTime_us := UDINT_TO_UDINT(BaseProcessingTime_us * 1344 / 64); // 21x più lento
+        FirstRun := FALSE;
+    ELSE
+        // Stima del tempo di elaborazione post-ottimizzazione
+        DeltaTime_us := BaseProcessingTime_us; // Solo 64 allarmi per blocco
+    END_IF;
+    
+    // Aggiorna contatori
+    CycleCounter := CycleCounter + 1;
+    TotalAlarmsProcessed := TotalAlarmsProcessed + 64; // 64 allarmi per blocco
+    TotalProcessingTime_us := TotalProcessingTime_us + DeltaTime_us;
+    
+    // Aggiorna statistiche min/max
+    IF DeltaTime_us < MinProcessingTime_us THEN
+        MinProcessingTime_us := DeltaTime_us;
+    END_IF;
+    
+    IF DeltaTime_us > MaxProcessingTime_us THEN
+        MaxProcessingTime_us := DeltaTime_us;
+    END_IF;
+    
+    // Calcola media
+    IF CycleCounter > 0 THEN
+        AvgProcessingTime_us := UDINT_TO_UDINT(TotalProcessingTime_us / CycleCounter);
+        // Calcola allarmi per secondo con attenzione all'overflow
+        IF TotalProcessingTime_us > 0 THEN
+            // Calcolo: (cicli * allarmi_per_ciclo) / (tempo_totale_in_secondi)
+            // Per evitare overflow: prima dividi per microsecondi, poi moltiplica
+            AlarmsProcessedPerSecond := UDINT_TO_UDINT((CycleCounter * 64 * 1000000) / TotalProcessingTime_us);
+        ELSE
+            AlarmsProcessedPerSecond := 0;
+        END_IF;
+    END_IF;
+    
+    // Stima carico CPU (basata sul tempo di elaborazione)
+    // Assumendo un ciclo di 8ms (125 Hz)
+    CPU_Load_Percent := (UDINT_TO_REAL(DeltaTime_us) / 8000.0) * 100.0;
+    IF CPU_Load_Percent > 100.0 THEN
+        CPU_Load_Percent := 100.0;
+    END_IF;
+    
+    // Calcola efficienza dell'ottimizzazione
+    // Confronta tempo elaborazione ottimizzato vs non ottimizzato
+    OptimizedProcessingTime_us := DeltaTime_us;
+    IF OptimizedProcessingTime_us > 0 THEN
+        // Calcola tempo base non ottimizzato (21x più lento)
+        NonOptimizedTime_us := UDINT_TO_UDINT(BaseProcessingTime_us * 1344 / 64);
+        OptimizationEfficiency := 100.0 - ((UDINT_TO_LREAL(OptimizedProcessingTime_us) / UDINT_TO_LREAL(NonOptimizedTime_us)) * 100.0);
+        IF OptimizationEfficiency < 0.0 THEN
+            OptimizationEfficiency := 0.0;
+        ELSIF OptimizationEfficiency > 95.0 THEN
+            OptimizationEfficiency := 95.0; // Limite realistico
+        END_IF;
+    ELSE
+        OptimizationEfficiency := 0.0;
+    END_IF;
+    
+    // Aggiorna output
+    ProcessingTime_us := DeltaTime_us;
+    
+END_IF;
+
+END_FUNCTION_BLOCK

@@ -1,0 +1,110 @@
+PROGRAM RecipeLoggingOptimizedBenchmark
+VAR
+    // Benchmark per versione ottimizzata
+    Benchmark : FB_RecipeLoggingBenchmark;
+    
+    // Timer per test
+    TestTimer : TON;
+    TestDuration : TIME := T#30s; // 30 secondi
+    
+    // Variabili di test
+    TestEnable : BOOL := FALSE;
+    TestReset : BOOL := FALSE;
+    TestActive : BOOL := FALSE;
+    TestComplete : BOOL := FALSE;
+    TestCounter : UDINT;
+    
+    // Simulazione logging recipe ottimizzato
+    RecipeSaveCounter : UDINT;
+    LogMessage : STRING(100);
+    
+    // Circular buffer simulation
+    EventBuffer : ARRAY[0..19] OF STRING(120);
+    BufferHead : INT := 0;
+    BufferCount : INT := 0;
+    
+    // Risultati del benchmark
+    CPU_Load : REAL;
+    ProcessingTime : UDINT;
+    LogsPerSecond : UDINT;
+    StringOpsPerSecond : UDINT;
+    
+    // Stato HMI
+    StatusMessage : STRING(50) := 'READY';
+    ElapsedTime_ms : TIME;
+END_VAR
+
+// Gestione avvio/arresto test
+IF NOT TestActive AND NOT TestComplete THEN
+    // Avvia il test
+    TestEnable := TRUE;
+    TestReset := TRUE;
+    TestActive := TRUE;
+    TestTimer(IN := TRUE, PT := TestDuration); // Avvia timer
+    TestCounter := 0;
+    RecipeSaveCounter := 0;
+    BufferHead := 0;
+    BufferCount := 0;
+    StatusMessage := 'TEST IN CORSO...';
+END_IF;
+
+// Esegui il benchmark
+Benchmark(
+    Enable := TestEnable,
+    Reset := TestReset,
+    CPU_Load_Percent => CPU_Load,
+    ProcessingTime_us => ProcessingTime,
+    LogsProcessedPerSecond => LogsPerSecond,
+    StringOperationsPerSecond => StringOpsPerSecond
+);
+
+// Resetta il flag di reset dopo il primo ciclo
+TestReset := FALSE;
+
+// Simula operazioni di logging recipe OTTIMIZZATE durante il test
+IF TestActive THEN
+    TestCounter := TestCounter + 1;
+    TestTimer(IN := TestActive, PT := TestDuration); // Aggiorna timer
+    ElapsedTime_ms := TestTimer.ET;
+    
+    // Simula salvataggi recipe ogni 500ms (stesso carico della versione attuale)
+    IF (TestCounter MOD 50) = 0 THEN
+        RecipeSaveCounter := RecipeSaveCounter + 1;
+        
+        // Simula il logging OTTIMIZZATO (circular buffer)
+        LogMessage := CONCAT('Recipe Nr: ', NumToDecString(RecipeSaveCounter, UINT#3, _BLANK), 
+                            ' saved by Admin at ', dtToString(TimeZoneAndDLS_DateTime));
+        
+        // Ottimizzazione: circular buffer invece di ArySHL per 100 elementi
+        EventBuffer[BufferHead] := LogMessage;
+        BufferHead := (BufferHead + 1) MOD 20;
+        
+        IF BufferCount < 20 THEN
+            BufferCount := BufferCount + 1;
+        END_IF;
+        
+        // Nessun spostamento memoria richiesto!
+        // Il buffer circolare sovrascrive automaticamente i dati vecchi
+    END_IF;
+    
+    // Termina il test quando il timer scade
+    IF TestTimer.Q THEN
+        TestEnable := FALSE;
+        TestActive := FALSE;
+        TestComplete := TRUE;
+        StatusMessage := 'TEST COMPLETATO';
+    END_IF;
+END_IF;
+
+// OUTPUT PER HMI:
+// - StatusMessage: Stato del test
+// - ElapsedTime_ms: Tempo trascorso
+// - TestCounter: Numero di cicli eseguiti
+// - RecipeSaveCounter: Numero di salvataggi recipe simulati
+// - CPU_Load: Carico CPU stimato (%)
+// - ProcessingTime: Tempo processing medio (μs)
+// - LogsPerSecond: Log processati al secondo
+// - StringOpsPerSecond: Operazioni stringa al secondo
+// - BufferCount: Numero di log nel buffer circolare
+
+END_PROGRAM

@@ -1,0 +1,65 @@
+FUNCTION_BLOCK FB_OptimizedRecipeLogger
+VAR_INPUT
+    Enable : BOOL; // Abilita il logging
+    LogMessage : STRING(100); // Messaggio da loggare
+    User : STRING(20); // Utente che ha fatto l'azione
+    RecipeNumber : INT; // Numero recipe
+END_VAR
+VAR_OUTPUT
+    LogAdded : BOOL; // TRUE quando un log è stato aggiunto
+    BufferFull : BOOL; // TRUE quando il buffer è pieno
+END_VAR
+VAR
+    // Circular buffer per event log
+    EventBuffer : ARRAY[0..19] OF STRING(120); // 20 slot per log (ridotto da 100)
+    BufferHead : INT := 0; // Punta alla prossima posizione libera
+    BufferTail : INT := 0; // Punta alla posizione più vecchia
+    LogCount : INT := 0; // Numero di log attivi
+    
+    // Cache per performance
+    LastLogTime : DT;
+    LastUser : STRING(20) := '';
+    
+    // Stato
+    Initialized : BOOL := FALSE;
+END_VAR
+
+// Inizializza buffer se necessario
+IF NOT Initialized THEN
+    FOR i := 0 TO 19 DO
+        EventBuffer[i] := '';
+    END_FOR;
+    Initialized := TRUE;
+END_IF;
+
+// Resetta flag di output
+LogAdded := FALSE;
+
+// Processa nuovo log se presente
+IF Enable AND LogMessage <> '' THEN
+    
+    // Aggiungi timestamp solo se necessario (ottimizzazione)
+    IF LastLogTime <> TimeZoneAndDLS_DateTime OR LastUser <> User THEN
+        EventBuffer[BufferHead] := CONCAT(dtToString(TimeZoneAndDLS_DateTime), '   ', LogMessage);
+        LastLogTime := TimeZoneAndDLS_DateTime;
+        LastUser := User;
+    ELSE
+        // Stesso timestamp, aggiungi solo messaggio
+        EventBuffer[BufferHead] := LogMessage;
+    END_IF;
+    
+    // Aggiorna puntatori circular buffer
+    BufferHead := (BufferHead + 1) MOD 20;
+    
+    IF LogCount < 20 THEN
+        LogCount := LogCount + 1;
+    ELSE
+        // Buffer pieno, aggiorna tail
+        BufferTail := (BufferTail + 1) MOD 20;
+        BufferFull := TRUE;
+    END_IF;
+    
+    LogAdded := TRUE;
+END_IF;
+
+END_FUNCTION_BLOCK
