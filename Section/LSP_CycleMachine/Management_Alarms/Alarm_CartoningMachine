@@ -1,239 +1,174 @@
 (********************************************************************************
-    Section: Alarm_Analytics nuova versione
-    Description: Scans all alarms, calculates advanced KPIs (Downtime, MTTR, MTBF),
-                 and manages the Top Alarm lists.
+    Alarm_CartoningMachine - Mapping bitwise e bounds checks (per Sysmac)
+    NOTE: versione specifica per CartoningMachine con Alarm IDs 0..60 (61 allarmi).
+    Assume ALARMS_PER_BLOCK definita come VAR_GLOBAL CONSTANT (es. 64).
 *********************************************************************************)
 
-// --- 1. Get Last Scan Cycle Time & Initialize ---
-LastScanCycleTime := T#8ms; // Placeholder - Replace with actual scan time retrieval
-LastScanCycleTime_ms := TimeToNanoSec(LastScanCycleTime) / 1000000;
 
-// --- Costanti per ottimizzazione block-based scanning ---
 
-NUM_BLOCKS := (MAX_ALARM_ID + 1) / ALARMS_PER_BLOCK; // Numero totale di blocchi (21 blocchi)
+// ---------------------------------------------------------------------------
+// 0) Prendi ALARMS_PER_BLOCK dalla costante globale (deve esistere a compile-time)
+// ---------------------------------------------------------------------------
+local_ALARMS_PER_BLOCK := ALARMS_PER_BLOCK; // se non è definita la build fallisce: comportamento desiderato
 
-// --- 2. Initialize Top Alarm Data on First Run ---
-IF P_First_Run THEN
-    FOR i := 0 TO 99 DO
-        // Initialize the Frequency list
-        ScadaInterface.Egress.TopAlarms_ByFrequency[i].AlarmId := -1; // -1 indicates an empty slot
-        ScadaInterface.Egress.TopAlarms_ByFrequency[i].Value   := 0.0;
-
-        // Initialize the Downtime list
-        ScadaInterface.Egress.TopAlarms_ByDowntime[i].AlarmId := -1;
-        ScadaInterface.Egress.TopAlarms_ByDowntime[i].Value   := 0.0;
-    END_FOR;
+// Protezione runtime su valore non sensato (fallback sicuro)
+IF local_ALARMS_PER_BLOCK <= 0 THEN
+    local_ALARMS_PER_BLOCK := 16; // fallback sicuro (meglio definire la costante globalmente)
 END_IF;
 
-// --- 3. Create Raw Alarm Image (Mapping) ---
+// ===========================================================================
+// 1) Calcola NumGroups = ceil((MAX_ALARM_ID+1)/64)
+// ===========================================================================
+NumGroups := ((MAX_ALARM_ID_LOCAL + 1) + 63) / 64; // per 61 -> 1
 
-NX_ImageLWORD[0].LW  := LINT_TO_LWORD(AlarmLINT0);
-NX_ImageLWORD[1].LW  := LINT_TO_LWORD(AlarmLINT4);
-NX_ImageLWORD[2].LW  := LINT_TO_LWORD(AlarmLINT8);
-NX_ImageLWORD[3].LW  := LINT_TO_LWORD(AlarmLINT12);
-NX_ImageLWORD[4].LW  := LINT_TO_LWORD(AlarmLINT16);
-NX_ImageLWORD[5].LW  := LINT_TO_LWORD(AlarmLINT20);
-NX_ImageLWORD[6].LW  := LINT_TO_LWORD(AlarmLINT24);
-NX_ImageLWORD[7].LW  := LINT_TO_LWORD(AlarmLINT28);
-NX_ImageLWORD[8].LW  := LINT_TO_LWORD(AlarmLINT32);
-NX_ImageLWORD[9].LW  := LINT_TO_LWORD(AlarmLINT36);
-NX_ImageLWORD[10].LW := LINT_TO_LWORD(AlarmLINT40);
-NX_ImageLWORD[11].LW := LINT_TO_LWORD(AlarmLINT44);
-NX_ImageLWORD[12].LW := LINT_TO_LWORD(AlarmLINT48);
-NX_ImageLWORD[13].LW := LINT_TO_LWORD(AlarmLINT52);
-NX_ImageLWORD[14].LW := LINT_TO_LWORD(AlarmLINT56);
-NX_ImageLWORD[15].LW := LINT_TO_LWORD(AlarmLINT60);
-
-
-
-// --- 4. Process Alarms in Blocks (Optimized Block-Based Scanning) ---
-// Processa un blocco di allarmi per ciclo per ridurre il carico CPU
-
-// Calcola gli indici di inizio e fine per il blocco corrente
-BlockStartIndex := BlockScanIndex * ALARMS_PER_BLOCK;
-BlockEndIndex := BlockStartIndex + ALARMS_PER_BLOCK - 1;
-IF BlockEndIndex > MAX_ALARM_ID THEN
-    BlockEndIndex := MAX_ALARM_ID;
+// ===========================================================================
+// 2) Popola NX_ImageLWORD per i gruppi effettivi
+//    Per cartoning serve solo il primo LWORD (AlarmLINT0). Azzera eventuali altri.
+// ===========================================================================
+IF NumGroups >= 1 THEN
+    NX_ImageLWORD[0].LW := LINT_TO_LWORD(AlarmLINT0);
 END_IF;
 
-// Processa solo il blocco corrente di allarmi
-FOR AlarmID := BlockStartIndex TO BlockEndIndex DO
-	
-	AlarmGroup := AlarmID / 64; // Divisione intera
-    GroupBit   := AlarmID MOD 64; // Resto della divisione
-    // Calculate LWORD group and bit index
-	
-    // Estrai il bit dell'allarme corrente
-    CurrentAlarmBit := NX_ImageLWORD[AlarmGroup].BL[GroupBit];
-    
-    // Rilevamento manuale del fronte di salita
-    RisingEdgeDetected := CurrentAlarmBit AND NOT PreviousAlarmBits[AlarmID];
-
-    // --- Aggiorna la Struttura di Analisi SCADA ---
-    ScadaInterface.Egress.AlarmAnalytics[AlarmID].State := CurrentAlarmBit;
-
-    IF RisingEdgeDetected THEN
-        ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count := ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count + 1;
-    END_IF;
-
-    IF CurrentAlarmBit THEN
-        ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms := 
-            ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms + LastScanCycleTime_ms;
-    END_IF;
-
-    // Memorizza lo stato attuale per il confronto al prossimo ciclo
-    PreviousAlarmBits[AlarmID] := CurrentAlarmBit;
+FOR i := 1 TO NumGroups - 1 DO
+    NX_ImageLWORD[i].LW := 0; // sicurezza se non esistono più AlarmLINT
 END_FOR;
 
-// Aggiorna l'indice del blocco per il prossimo ciclo
+// ===========================================================================
+// 3) Calcolo blocchi per scansione (ceil) e indici
+// ===========================================================================
+NUM_BLOCKS_LOCAL := ((MAX_ALARM_ID_LOCAL + 1) + local_ALARMS_PER_BLOCK - 1) / local_ALARMS_PER_BLOCK;
+
+BlockStartIndex := BlockScanIndex * local_ALARMS_PER_BLOCK;
+BlockEndIndex := BlockStartIndex + local_ALARMS_PER_BLOCK - 1;
+IF BlockEndIndex > MAX_ALARM_ID_LOCAL THEN
+    BlockEndIndex := MAX_ALARM_ID_LOCAL;
+END_IF;
+
+// ===========================================================================
+// 4) Preparazione bounds per protezioni
+// ===========================================================================
+prevBitsUpper  := DINT_TO_INT( UPPER_BOUND(PreviousAlarmBits, 1)); 
+analyticsUpper := DINT_TO_INT( UPPER_BOUND(ScadaInterface.Egress.AlarmAnalytics, 1)); 
+packedUpper    := DINT_TO_INT( UPPER_BOUND(ScadaInterface.Egress.Alarms_Packed, 1));
+
+// ===========================================================================
+// 5) Process alarms nel blocco corrente con protezioni sui bounds
+//    (sostituisce l'uso di CONTINUE con IF guards)
+// ===========================================================================
+FOR AlarmID := BlockStartIndex TO BlockEndIndex DO
+
+    // Verifica che AlarmID sia valido prima di eseguire il corpo
+    IF (AlarmID >= 0) AND (AlarmID <= MAX_ALARM_ID_LOCAL) THEN
+
+        AlarmGroup := AlarmID / 64;      // 0 per AlarmID 0..63
+        GroupBit   := AlarmID MOD 64;    // 0..63
+
+        // Protezione accesso NX_ImageLWORD
+        IF (AlarmGroup < 0) OR (AlarmGroup >= NumGroups) THEN
+            CurrentAlarmBit := FALSE;
+        ELSE
+            IF (GroupBit >= 0) AND (GroupBit <= 63) THEN
+                CurrentAlarmBit := NX_ImageLWORD[AlarmGroup].BL[GroupBit];
+            ELSE
+                CurrentAlarmBit := FALSE;
+            END_IF;
+        END_IF;
+
+        // Rising edge detection con protezione bounds PreviousAlarmBits
+        IF (AlarmID >= 0) AND (AlarmID <= prevBitsUpper) THEN
+            RisingEdgeDetected := CurrentAlarmBit AND NOT PreviousAlarmBits[AlarmID];
+        ELSE
+            RisingEdgeDetected := CurrentAlarmBit; // se non posso leggere il precedente, tratta come nuovo
+        END_IF;
+
+        // Aggiorna AlarmAnalytics con protezione bounds
+        IF (AlarmID >= 0) AND (AlarmID <= analyticsUpper) THEN
+            ScadaInterface.Egress.AlarmAnalytics[AlarmID].State := CurrentAlarmBit;
+            IF RisingEdgeDetected THEN
+                ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count := ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count + 1;
+            END_IF;
+            IF CurrentAlarmBit THEN
+                ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms := 
+                    ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms + LastScanCycleTime_ms;
+            END_IF;
+        END_IF;
+
+        // Aggiorna PreviousAlarmBits se possibile
+        IF (AlarmID >= 0) AND (AlarmID <= prevBitsUpper) THEN
+            PreviousAlarmBits[AlarmID] := CurrentAlarmBit;
+        END_IF;
+
+    END_IF; // fine validazione AlarmID
+
+END_FOR;
+
+// ===========================================================================
+// 6) Aggiorna BlockScanIndex in modo sicuro
+// ===========================================================================
 BlockScanIndex := BlockScanIndex + 1;
-IF BlockScanIndex >= NUM_BLOCKS THEN
+IF BlockScanIndex >= NUM_BLOCKS_LOCAL THEN
     BlockScanIndex := 0;
 END_IF;
 
-// --- Calcolo MTTR e MTBF (ulteriormente ottimizzato con caching) ---
-// Calcola MTTR/MTBF solo per gli allarmi del blocco corrente e solo quando necessario
+// ===========================================================================
+// 7) Calcolo MTTR/MTBF per gli allarmi del blocco (mantieni logica originale)
+//    Anche qui evitiamo CONTINUE usando IF guards
+// ===========================================================================
 FOR AlarmID := BlockStartIndex TO BlockEndIndex DO
-    // Calcola MTTR/MTBF solo se l'allarme ha avuto attivazioni e solo ogni 10 cicli per ridurre i calcoli
-    IF ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count > 0 AND (CycleCount MOD 10 = 0 OR 
-        ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTTR_sec = 0.0) THEN
-        
-        // Cache il tempo totale monitorato per evitare calcoli ripetuti
+
+    IF (AlarmID >= 0) AND (AlarmID <= MAX_ALARM_ID_LOCAL) AND
+       (AlarmID <= analyticsUpper) AND
+       (ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count > 0) AND
+       ( (CycleCount MOD 10) = 0 OR ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTTR_sec = 0.0 ) THEN
+
         IF CachedTotalTime_sec = 0.0 THEN
             CachedTotalTime_sec := LINT_TO_LREAL(MachineAnalytics.TimeAnalytics.TotalTime.Hours * 3600 + 
-                                               MachineAnalytics.TimeAnalytics.TotalTime.Minutes * 60);
+                                                 MachineAnalytics.TimeAnalytics.TotalTime.Minutes * 60);
         END_IF;
-        
-        // Calcolo MTTR (Mean Time To Repair)
+
         ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTTR_sec := 
             (LINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms) / 1000.0) 
             / DINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count);
 
-        // Calcolo MTBF (Mean Time Between Failures)
         TotalActiveTime_sec := LINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].TotalActiveTime_ms) / 1000.0;
-        
+
         ScadaInterface.Egress.AlarmAnalytics[AlarmID].MTBF_h :=
             ((CachedTotalTime_sec - TotalActiveTime_sec) / DINT_TO_LREAL(ScadaInterface.Egress.AlarmAnalytics[AlarmID].Count)) / 3600.0;
+
     END_IF;
+
 END_FOR;
 
-// Resetta la cache del tempo totale ogni ciclo
+// Reset cache e incremento cycle count (come prima)
 CachedTotalTime_sec := 0.0;
-
-// Incrementa il contatore cicli
 CycleCount := CycleCount + 1;
 IF CycleCount >= 10000 THEN
-    CycleCount := 0; // Resetta per evitare overflow
+    CycleCount := 0;
+END_IF;
+
+// ===========================================================================
+// 8) TopAlarmScanIndex: usa modulo (MAX_ALARM_ID+1)
+// ===========================================================================
+TopAlarmScanIndex := (TopAlarmScanIndex + 1) MOD (MAX_ALARM_ID_LOCAL + 1);
+
+// ===========================================================================
+// 9) Copia LWORD -> Packed usando NumGroups e protezioni
+// ===========================================================================
+IF (packedUpper >= 0) THEN
+    FOR i := 0 TO NumGroups - 1 DO
+        FOR k := 0 TO 3 DO
+            IF (i*4 + k) <= packedUpper THEN
+                ScadaInterface.Egress.Alarms_Packed[i*4 + k] := NX_ImageLWORD[i].W[k];
+            END_IF;
+        END_FOR;
+    END_FOR;
 END_IF;
 
 (********************************************************************************
-    Section: Alarm_Analytics - PART 3: Periodic Update of Top Alarm Lists
-    Description: Periodically scans alarms and updates the Top Alarm lists
-                 using a robust, multi-step logic. (Final Guaranteed Version)
+    NOTE:
+    - Questa versione evita CONTINUE (non supportato da Omron) e usa IF guard per
+      eseguire il corpo del ciclo solo quando gli indici sono validi.
+    - Assicurati che le variabili globali (ALARM_PER_BLOCK, PreviousAlarmBits, 
+      ScadaInterface.Egress.AlarmAnalytics, NX_ImageLWORD, ecc.) siano dichiarate
+      con dimensioni compatibili.
 *********************************************************************************)
-
-// Blinker logic to generate periodic trigger pulses
-T_Off(IN := NOT T_On.Q AND EnableBlinker, PT := PeriodoOff);; // Off timer starts when On timer is off
-T_On(IN := T_Off.Q AND EnableBlinker, PT := PeriodoOn);   // On timer starts when Off timer is on
-PulseTrig(CLK := T_On.Q);                                          // Trigger pulse on rising edge of On timer
-
-// This logic executes only on the rising edge of a periodic trigger pulse (PulseTrig.Q)
-// OTTIMIZZATO: Aggiornamento differito con buffer per ridurre il carico CPU
-IF PulseTrig.Q AND (TopAlarmUpdateCycleCount MOD TopAlarmUpdateInterval = 0) THEN
-
-    // Aggiorna solo un subset di allarmi per ridurre il carico CPU
-    FOR j := 0 TO (TOP_ALARMS_TO_UPDATE_PER_CYCLE - 1) DO
-        
-        CurrentAlarmID_ToCheck := TopAlarmScanIndex;
-        
-        //======================================================================
-        // 1. UPDATE TOP ALARMS BY FREQUENCY (ottimizzato)
-        //======================================================================
-        CurrentAlarmFrequency := ScadaInterface.Egress.AlarmAnalytics[CurrentAlarmID_ToCheck].Count;
-        
-        // Solo se l'allarme ha una frequenza significativa
-        IF CurrentAlarmFrequency > 0 THEN
-            // Controlla se l'allarme è già nella lista
-            IsAlreadyInList := FALSE;
-            FOR y := 0 TO 99 DO
-                IF ScadaInterface.Egress.TopAlarms_ByFrequency[y].AlarmId = CurrentAlarmID_ToCheck THEN
-                    ScadaInterface.Egress.TopAlarms_ByFrequency[y].Value := DINT_TO_LREAL(CurrentAlarmFrequency);
-                    IsAlreadyInList := TRUE;
-                    EXIT;
-                END_IF;
-            END_FOR;
-
-            // Se non è nella lista, cerca solo se la frequenza è abbastanza alta
-            IF NOT IsAlreadyInList AND CurrentAlarmFrequency > TopAlarmMinThreshold THEN
-                MinFrequencyInTopList := ScadaInterface.Egress.TopAlarms_ByFrequency[0].Value;
-                IndexToUpdate := 0;
-                FOR y := 1 TO 99 DO
-                    IF ScadaInterface.Egress.TopAlarms_ByFrequency[y].Value < MinFrequencyInTopList THEN
-                        MinFrequencyInTopList := ScadaInterface.Egress.TopAlarms_ByFrequency[y].Value;
-                        IndexToUpdate := y;
-                    END_IF;
-                END_FOR;
-
-                IF DINT_TO_LREAL(CurrentAlarmFrequency) > MinFrequencyInTopList THEN
-                    ScadaInterface.Egress.TopAlarms_ByFrequency[IndexToUpdate].AlarmId := CurrentAlarmID_ToCheck;
-                    ScadaInterface.Egress.TopAlarms_ByFrequency[IndexToUpdate].Value := DINT_TO_LREAL(CurrentAlarmFrequency);
-                END_IF;
-            END_IF;
-        END_IF;
-
-        //======================================================================
-        // 2. UPDATE TOP ALARMS BY DOWNTIME (ottimizzato)
-        //======================================================================
-        CurrentAlarmDowntime := ScadaInterface.Egress.AlarmAnalytics[CurrentAlarmID_ToCheck].TotalActiveTime_ms;
-        
-        // Solo se l'allarme ha un downtime significativo (> 1 secondo)
-        IF CurrentAlarmDowntime > 1000 THEN
-            IsAlreadyInList := FALSE;
-            FOR y := 0 TO 99 DO
-                IF ScadaInterface.Egress.TopAlarms_ByDowntime[y].AlarmId = CurrentAlarmID_ToCheck THEN
-                    ScadaInterface.Egress.TopAlarms_ByDowntime[y].Value := LINT_TO_LREAL(CurrentAlarmDowntime);
-                    IsAlreadyInList := TRUE;
-                    EXIT;
-                END_IF;
-            END_FOR;
-
-            // Se non è nella lista, cerca solo se il downtime è abbastanza alto
-            IF NOT IsAlreadyInList AND CurrentAlarmDowntime > TopDowntimeMinThreshold THEN
-                MinDowntimeInTopList := ScadaInterface.Egress.TopAlarms_ByDowntime[0].Value;
-                IndexToUpdate := 0;
-                FOR y := 1 TO 99 DO
-                    IF ScadaInterface.Egress.TopAlarms_ByDowntime[y].Value < MinDowntimeInTopList THEN
-                        MinDowntimeInTopList := ScadaInterface.Egress.TopAlarms_ByDowntime[y].Value;
-                        IndexToUpdate := y;
-                    END_IF;
-                END_FOR;
-
-                IF LINT_TO_LREAL(CurrentAlarmDowntime) > MinDowntimeInTopList THEN
-                    ScadaInterface.Egress.TopAlarms_ByDowntime[IndexToUpdate].AlarmId := CurrentAlarmID_ToCheck;
-                    ScadaInterface.Egress.TopAlarms_ByDowntime[IndexToUpdate].Value := LINT_TO_LREAL(CurrentAlarmDowntime);
-                END_IF;
-            END_IF;
-        END_IF;
-
-        // Passa all'allarme successivo
-        TopAlarmScanIndex := (TopAlarmScanIndex + 1) MOD MAX_ALARM_ID;
-        
-    END_FOR;
-    
-END_IF;
-
-// Incrementa contatore per aggiornamento differito
-TopAlarmUpdateCycleCount := TopAlarmUpdateCycleCount + 1;
-IF TopAlarmUpdateCycleCount >= 1000 THEN
-    TopAlarmUpdateCycleCount := 0;
-END_IF;
-
-// --- 6. Data Conversion for Packed Alarms ---
-
-// Copies data from NX_ImageLWORD (Word array) to Scada_Mes_EthIP.Scada_Mes_Egress.Allarms_DWord (DWord array)
-// Reorganizes data: 4 Words from NX_ImageLWORD become 1 DWord in Allarms_DWord
-FOR i := 0 TO 24 BY 1 DO
-    FOR k := 0 TO 3 BY 1 DO
-        ScadaInterface.Egress.Alarms_Packed[i*4 + k] := NX_ImageLWORD[i].W[k];
-    END_FOR;
-END_FOR;
